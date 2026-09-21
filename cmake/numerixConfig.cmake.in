@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Kokkos)
+
+include("${CMAKE_CURRENT_LIST_DIR}/numerixTargets.cmake")
+
+check_required_components(numerix)
