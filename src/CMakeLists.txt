@@ -7,12 +7,17 @@ target_include_directories(numerix PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_include_directories(numerix PRIVATE ${CMAKE_BINARY_DIR})
+target_include_directories(numerix PRIVATE ${PROJECT_BINARY_DIR})
+
+# 使用方可能把 numerix 静态库链进自己的共享库，因此 numerix 自己带 PIC；
+# 这是 numerix 目标的属性，不是强加给使用方的编译选项。
+set_target_properties(numerix PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(numerix
     PUBLIC
         numerix_options
         Kokkos::kokkos
+        Kokkos::kokkoskernels
     PRIVATE
         numerix_warnings
 )

@@ -1,0 +1,8 @@
+# 编译数据库里没有 include/ 下的条目，clangd 会为公共头文件退回到任意一条编译命令（本仓库中多为
+# Kokkos 源文件），从而丢失 -I<repo>/include。编译命令的工作目录是 CMake 二进制目录（build/、
+# build-release/），因此 ../include 即仓库的 include。
+If:
+  PathMatch: include/.*
+CompileFlags:
+  Add:
+    - -I../include

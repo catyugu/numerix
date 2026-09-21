@@ -1,101 +1,72 @@
 #pragma once
 
-#include <cmath>
 #include <cstddef>
 #include <utility>
 
-#include <numerix/core/assert.hpp>
+#include <Kokkos_Core.hpp>
+
+#include <numerix/core/concepts.hpp>
 #include <numerix/core/scalar.hpp>
+#include <numerix/execution/execution_space.hpp>
 #include <numerix/memory/memory_space.hpp>
 
 namespace numerix {
 
-    // 动态向量：内部持有 Kokkos::View，不重新定义 View 语义，也不引入任何隐式拷贝。
-    template <Scalar T, MemorySpace Mem = Memory>
+    // 动态向量：owning、move-only 的存储，只负责"拥有内存 + 交出 View"。
+    // 刻意不提供拷贝构造：Kokkos::View 的拷贝是引用计数式的句柄共享，与数学向量的直觉冲突，
+    // 隐式共享会让 a = b 的行为难以预测。需要复制时显式写 Clone/DeepCopy，
+    // 需要别名或 subview 时直接用 Kokkos::View。
+    template <Scalar T, MemorySpace Mem = DefaultMemorySpace>
     class Vector {
     public:
         using value_type = T;
         using memory_space = Mem;
         using execution_space = typename Mem::execution_space;
+        using size_type = std::size_t;
         using view_type = Kokkos::View<T*, Mem>;
+        using const_view_type = typename view_type::const_type;
 
-        explicit Vector(std::size_t size) : values_("numerix::Vector", size) { }
+        explicit Vector(size_type size) : values_("numerix::Vector", size) { }
 
-        // 包装已有 View：不复制数据，所有权仍归调用方。
-        explicit Vector(view_type values) : values_(std::move(values)) { }
+        // 接管已有 View 的所有权（移动，不复制数据）。调用后源 View 不再持有该 allocation。
+        explicit Vector(view_type values) noexcept : values_(std::move(values)) { }
 
-        std::size_t Size() const { return static_cast<std::size_t>(values_.extent(0)); }
+        Vector(const Vector&) = delete;
+        Vector& operator=(const Vector&) = delete;
+        Vector(Vector&&) noexcept = default;
+        Vector& operator=(Vector&&) noexcept = default;
+        ~Vector() = default;
 
-        T* Data() const { return values_.data(); }
+        size_type Size() const noexcept { return static_cast<size_type>(values_.extent(0)); }
 
-        const view_type& View() const { return values_; }
+        T* Data() noexcept { return values_.data(); }
+        const T* Data() const noexcept { return const_view_type(values_).data(); }
 
-        void Scale(T alpha);
-        void Axpy(T alpha, const Vector& x);
-        void CopyFrom(const Vector& other);
-        T Dot(const Vector& x) const;
-        RealOfT<T> SquaredNorm() const;
-        RealOfT<T> Norm() const;
+        // View 是廉价句柄，按值返回即可；const Vector 只能交出 const 数据的 View，
+        // 与 Kokkos 的 const View<double*> / View<const double*> 区分一致。
+        view_type View() noexcept { return values_; }
+        const_view_type View() const noexcept { return values_; }
 
     private:
         view_type values_;
     };
 
-    template <Scalar T, MemorySpace Mem>
-    void Vector<T, Mem>::Scale(T alpha)
+    // 显式复制：dst = src，在给定的 execution-space instance 上执行。
+    template <class Exec, Scalar T, MemorySpace Mem>
+        requires AccessibleFrom<Exec, Mem>
+    void DeepCopy(const Exec& exec, Vector<T, Mem>& dst, const Vector<T, Mem>& src)
     {
-        const view_type values = values_;
-        Kokkos::parallel_for(
-            "numerix::Vector::Scale", Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Size())),
-            KOKKOS_LAMBDA(int i) { values(i) *= alpha; });
+        Kokkos::deep_copy(exec, dst.View(), src.View());
     }
 
-    template <Scalar T, MemorySpace Mem>
-    void Vector<T, Mem>::Axpy(T alpha, const Vector& x)
+    // 显式克隆：分配新内存并复制内容，结果与源不共享 allocation。
+    template <class Exec, Scalar T, MemorySpace Mem>
+        requires AccessibleFrom<Exec, Mem>
+    Vector<T, Mem> Clone(const Exec& exec, const Vector<T, Mem>& x)
     {
-        NUMERIX_ASSERT(x.Size() == Size());
-        const view_type values = values_;
-        const view_type other = x.values_;
-        Kokkos::parallel_for(
-            "numerix::Vector::Axpy", Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Size())),
-            KOKKOS_LAMBDA(int i) { values(i) += alpha * other(i); });
-    }
-
-    template <Scalar T, MemorySpace Mem>
-    void Vector<T, Mem>::CopyFrom(const Vector& other)
-    {
-        NUMERIX_ASSERT(other.Size() == Size());
-        Kokkos::deep_copy(values_, other.values_);
-    }
-
-    template <Scalar T, MemorySpace Mem>
-    T Vector<T, Mem>::Dot(const Vector& x) const
-    {
-        NUMERIX_ASSERT(x.Size() == Size());
-        const view_type values = values_;
-        const view_type other = x.values_;
-        T sum = T(0);
-        Kokkos::parallel_reduce(
-            "numerix::Vector::Dot", Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Size())),
-            KOKKOS_LAMBDA(int i, T& local) { local += Conj(values(i)) * other(i); }, sum);
-        return sum;
-    }
-
-    template <Scalar T, MemorySpace Mem>
-    RealOfT<T> Vector<T, Mem>::SquaredNorm() const
-    {
-        if constexpr (Complex<T>) {
-            return std::real(Dot(*this));
-        }
-        else {
-            return Dot(*this);
-        }
-    }
-
-    template <Scalar T, MemorySpace Mem>
-    RealOfT<T> Vector<T, Mem>::Norm() const
-    {
-        return std::sqrt(SquaredNorm());
+        Vector<T, Mem> copy(x.Size());
+        DeepCopy(exec, copy, x);
+        return copy;
     }
 
 } // namespace numerix

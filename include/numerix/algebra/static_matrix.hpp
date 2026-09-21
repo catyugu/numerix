@@ -1,64 +1,81 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
+
+#include <Kokkos_Array.hpp>
+#include <Kokkos_Macros.hpp>
 
 #include <numerix/algebra/static_vector.hpp>
 
 namespace numerix {
 
     // 栈上定长矩阵：行主序存储，values_[i * C + j] 对应 A(i, j)。
+    // 与 StaticVector 一样，所有操作都是 KOKKOS_INLINE_FUNCTION。
     template <Scalar T, std::size_t R, std::size_t C>
     class StaticMatrix {
     public:
         using value_type = T;
+        using size_type = std::size_t;
 
+        KOKKOS_INLINE_FUNCTION
         constexpr StaticMatrix() = default;
 
-        static constexpr std::size_t NumRows() { return R; }
-        static constexpr std::size_t NumCols() { return C; }
+        KOKKOS_INLINE_FUNCTION
+        static constexpr size_type NumRows() noexcept { return R; }
 
-        constexpr T& operator()(std::size_t i, std::size_t j) { return values_[i * C + j]; }
-        constexpr const T& operator()(std::size_t i, std::size_t j) const { return values_[i * C + j]; }
+        KOKKOS_INLINE_FUNCTION
+        static constexpr size_type NumCols() noexcept { return C; }
 
-        static constexpr StaticMatrix Identity()
+        KOKKOS_INLINE_FUNCTION
+        constexpr T& operator()(size_type i, size_type j) noexcept { return values_[i * C + j]; }
+
+        KOKKOS_INLINE_FUNCTION
+        constexpr const T& operator()(size_type i, size_type j) const noexcept { return values_[i * C + j]; }
+
+        KOKKOS_INLINE_FUNCTION
+        static constexpr StaticMatrix Identity() noexcept
             requires(R == C)
         {
             StaticMatrix result;
-            for (std::size_t i = 0; i < R; ++i) {
+            for (size_type i = 0; i < R; ++i) {
                 result(i, i) = T(1);
             }
             return result;
         }
 
-        constexpr T Trace() const
+        KOKKOS_INLINE_FUNCTION
+        constexpr T Trace() const noexcept
             requires(R == C)
         {
             T sum = T(0);
-            for (std::size_t i = 0; i < R; ++i) {
+            for (size_type i = 0; i < R; ++i) {
                 sum += values_[i * C + i];
             }
             return sum;
         }
 
-        constexpr StaticMatrix<T, C, R> Transpose() const
+        KOKKOS_INLINE_FUNCTION
+        constexpr StaticMatrix<T, C, R> Transpose() const noexcept
         {
             StaticMatrix<T, C, R> result;
-            for (std::size_t i = 0; i < R; ++i) {
-                for (std::size_t j = 0; j < C; ++j) {
+            for (size_type i = 0; i < R; ++i) {
+                for (size_type j = 0; j < C; ++j) {
                     result(j, i) = values_[i * C + j];
                 }
             }
             return result;
         }
 
-        constexpr StaticVector<T, R> Apply(const StaticVector<T, C>& x) const
+        KOKKOS_INLINE_FUNCTION
+        constexpr StaticVector<T, R> Apply(const StaticVector<T, C>& x) const noexcept
         {
             StaticVector<T, R> y;
-            for (std::size_t i = 0; i < R; ++i) {
+            for (size_type i = 0; i < R; ++i) {
                 T sum = T(0);
-                for (std::size_t j = 0; j < C; ++j) {
-                    sum += values_[i * C + j] * x[j];
+                for (size_type j = 0; j < C; ++j) {
+                    T term = values_[i * C + j];
+                    term *= x[j];
+                    sum += term;
                 }
                 y[i] = sum;
             }
@@ -66,7 +83,7 @@ namespace numerix {
         }
 
     private:
-        std::array<T, R * C> values_ {};
+        Kokkos::Array<T, R * C> values_ {};
     };
 
 } // namespace numerix

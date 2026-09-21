@@ -14,26 +14,37 @@ namespace numerix {
         // 概念约束必须在编译期生效：不满足契约的类型不应被接受。
         static_assert(Scalar<double>);
         static_assert(Scalar<float>);
-        static_assert(Scalar<std::complex<double>>);
+        static_assert(Scalar<Kokkos::complex<double>>);
         static_assert(!Scalar<int>);
         static_assert(!Scalar<bool>);
-        static_assert(Complex<std::complex<float>>);
-        static_assert(!Complex<double>);
+        // numerix 的复数标量是 Kokkos::complex，std::complex 在设备端不可用。
+        static_assert(!Scalar<std::complex<double>>);
 
         static_assert(std::is_same_v<RealOfT<double>, double>);
-        static_assert(std::is_same_v<RealOfT<std::complex<float>>, float>);
+        static_assert(std::is_same_v<RealOfT<Kokkos::complex<float>>, float>);
 
-        static_assert(VectorLike<StaticVector<double, 3>>);
-        static_assert(VectorLike<Vector<double>>);
-        static_assert(!VectorLike<double>);
+        static_assert(ExecutionSpace<DefaultExecutionSpace>);
+        static_assert(!ExecutionSpace<double>);
+        static_assert(MemorySpace<DefaultMemorySpace>);
+        static_assert(MemorySpace<DefaultHostMemorySpace>);
+        static_assert(AccessibleFrom<DefaultExecutionSpace, DefaultMemorySpace>);
 
-        static_assert(MemorySpace<Memory>);
-        static_assert(MemorySpace<HostMemory>);
+        using MutableView = Kokkos::View<double*, DefaultMemorySpace>;
+        using ConstView = Kokkos::View<const double*, DefaultMemorySpace>;
+        static_assert(DenseVector<MutableView>);
+        static_assert(DenseVector<ConstView>);
+        static_assert(MutableDenseVector<MutableView>);
+        static_assert(!MutableDenseVector<ConstView>);
+        static_assert(!DenseVector<Kokkos::View<double**, DefaultMemorySpace>>);
+        // 裸指针不满足 DenseVector：设备端指针在主机上不可解引用。
+        static_assert(!DenseVector<double*>);
 
-        constexpr std::complex<double> kZ {3.0, 4.0};
+        // 标量语义必须在编译期可用：Conj/SquaredMagnitude 是 KOKKOS_INLINE_FUNCTION + constexpr。
+        constexpr Kokkos::complex<double> kZ {3.0, 4.0};
         static_assert(SquaredMagnitude(kZ) == 25.0);
-        static_assert(Conj(kZ) == std::complex<double>(3.0, -4.0));
+        static_assert(Conj(kZ) == Kokkos::complex<double>(3.0, -4.0));
         static_assert(Conj(2.0) == 2.0);
+        static_assert(SquaredMagnitude(-3.0) == 9.0);
 
         constexpr StaticMatrix<double, 2, 3> MakeRectangular()
         {
@@ -48,7 +59,7 @@ namespace numerix {
             return matrix;
         }
 
-        // 定长代数必须能整段在编译期求值。
+        // 定长代数必须能整段在编译期求值，实数和复数都一样。
         constexpr auto kRect = MakeRectangular();
         static_assert(kRect(0, 0) == 1.0);
         static_assert(kRect(1, 2) == 6.0);
@@ -67,12 +78,13 @@ namespace numerix {
         static_assert((kA - kA)[0] == 0.0);
         static_assert((2.0 * kA)[1] == 8.0);
 
-        TEST(StatusTest, RoundTripsThroughName)
-        {
-            EXPECT_TRUE(IsOk(Status::kOk));
-            EXPECT_FALSE(IsOk(Status::kBreakdown));
-            EXPECT_EQ(ToString(Status::kNotConverged), "not converged");
-        }
+        constexpr Kokkos::Array<Kokkos::complex<double>, 2> kComplexValues {{Kokkos::complex<double>(1.0, 2.0),
+            Kokkos::complex<double>(3.0, -1.0)}};
+        constexpr StaticVector<Kokkos::complex<double>, 2> kComplex {kComplexValues};
+        static_assert(kComplex.SquaredNorm() == 15.0);
+        static_assert(kComplex.Dot(kComplex).real() == 15.0);
+        static_assert(kComplex.Dot(kComplex).imag() == 0.0);
+        static_assert(StaticMatrix<Kokkos::complex<double>, 2, 2>::Identity().Apply(kComplex)[1].real() == 3.0);
 
         TEST(LoggerTest, FiltersBelowConfiguredLevel)
         {
@@ -136,6 +148,7 @@ namespace numerix {
             EXPECT_EQ(config::kVersionPatch, 0);
         }
 
+        // Kokkos::sqrt 是设备端函数而不是 constexpr，因此范数只能在运行期求值。
         TEST(StaticAlgebraTest, NormIsNotConstexprButCorrect)
         {
             EXPECT_DOUBLE_EQ(kA.Norm(), 5.0);

@@ -6,98 +6,101 @@
 
 #include <numerix/numerix.hpp>
 
+#include "test_support.hpp"
+
 namespace numerix {
     namespace {
 
+        using test_support::Exec;
+        using test_support::FillRamp;
+        using test_support::index_type;
+        using test_support::RangeOf;
+        using test_support::ToHost;
+
         constexpr std::size_t kSize = 64;
+        using View = Kokkos::View<double*, DefaultMemorySpace>;
 
         Vector<double> MakeVector(double base, double step)
         {
             Vector<double> v(kSize);
-            auto values = v.View();
-            Kokkos::parallel_for(
-                "test::Fill", Kokkos::RangePolicy<>(0, static_cast<int>(kSize)),
-                KOKKOS_LAMBDA(int i) { values(i) = base + step * i; });
+            FillRamp(v, base, step);
             return v;
         }
 
-        std::vector<double> ToHost(const Vector<double>& v)
-        {
-            const auto mirror = Kokkos::create_mirror_view_and_copy(HostMemory(), v.View());
-            std::vector<double> values(mirror.extent(0));
-            for (std::size_t i = 0; i < values.size(); ++i) {
-                values[i] = mirror(i);
-            }
-            return values;
-        }
-
-        Vector<double> LinearCombination(double alpha, const Vector<double>& x, double beta, const Vector<double>& y)
-        {
-            Vector<double> result(kSize);
-            result.CopyFrom(x);
-            result.Scale(alpha);
-            result.Axpy(beta, y);
-            return result;
-        }
-
-        // 测试算子：y = alpha * x
-        class ScaleOperator {
+        // 测试算子：y = alpha * A x + beta * y，其中 A = diag(d)。
+        // 融合形式一次 kernel 完成，省掉一次额外的内存往返（KokkosSparse::spmv 也是这种形式）。
+        // 输出 View 按 Kokkos 约定用 const 引用传：句柄是 const 的，数据仍可写。
+        class DiagonalOperator {
         public:
-            explicit ScaleOperator(double alpha) : alpha_(alpha) { }
+            explicit DiagonalOperator(View diagonal) : diagonal_(std::move(diagonal)) { }
 
-            void Apply(const Vector<double>& x, Vector<double>& y) const
+            template <class Exec, class X, class Y>
+            void Apply(const Exec& exec, const X& x, const Y& y) const
             {
-                y.CopyFrom(x);
-                y.Scale(alpha_);
+                Apply(exec, 1.0, x, 0.0, y);
+            }
+
+            template <class Exec, class X, class Y>
+            void Apply(const Exec& exec, double alpha, const X& x, double beta, const Y& y) const
+            {
+                const auto diagonal = diagonal_;
+                Kokkos::parallel_for(
+                    "test::DiagonalOperator::Apply", RangeOf(exec, x),
+                    KOKKOS_LAMBDA(index_type i) { y(i) = alpha * diagonal(i) * x(i) + beta * y(i); });
+            }
+
+        private:
+            View diagonal_;
+        };
+
+        // 只有 y = A x 的算子：用来确认 ScaledLinearOperatorFor 不会误判。
+        class PlainScaleOperator {
+        public:
+            explicit PlainScaleOperator(double alpha) : alpha_(alpha) { }
+
+            template <class Exec, class X, class Y>
+            void Apply(const Exec& exec, const X& x, const Y& y) const
+            {
+                Kokkos::deep_copy(exec, y, x);
+                Scale(exec, alpha_, y);
             }
 
         private:
             double alpha_;
         };
 
-        // 测试算子：y = diag(d) * x
-        class DiagonalOperator {
-        public:
-            explicit DiagonalOperator(Vector<double> diagonal) : diagonal_(std::move(diagonal)) { }
+        struct NotAnOperator { };
 
-            void Apply(const Vector<double>& x, Vector<double>& y) const
-            {
-                const auto diagonal = diagonal_.View();
-                const auto input = x.View();
-                auto output = y.View();
-                Kokkos::parallel_for(
-                    "test::DiagonalOperator", Kokkos::RangePolicy<>(0, static_cast<int>(x.Size())),
-                    KOKKOS_LAMBDA(int i) { output(i) = diagonal(i) * input(i); });
-            }
-
-        private:
-            Vector<double> diagonal_;
-        };
-
-        static_assert(LinearOperator<ScaleOperator, Vector<double>>);
-        static_assert(LinearOperator<DiagonalOperator, Vector<double>>);
-        static_assert(Preconditioner<DiagonalOperator, Vector<double>>);
+        static_assert(LinearOperatorFor<DiagonalOperator, DefaultExecutionSpace, View>);
+        static_assert(ScaledLinearOperatorFor<DiagonalOperator, DefaultExecutionSpace, View>);
+        static_assert(LinearOperatorFor<PlainScaleOperator, DefaultExecutionSpace, View>);
+        static_assert(!ScaledLinearOperatorFor<PlainScaleOperator, DefaultExecutionSpace, View>);
+        static_assert(!LinearOperatorFor<NotAnOperator, DefaultExecutionSpace, View>);
 
         TEST(OperatorPropertyTest, LinearityHoldsForDiagonalOperator)
         {
-            const DiagonalOperator op(MakeVector(1.0, 0.5));
+            Vector<double> diagonal = MakeVector(1.0, 0.5);
+            const DiagonalOperator op(diagonal.View());
             const Vector<double> x = MakeVector(2.0, -0.25);
             const Vector<double> y = MakeVector(-1.0, 0.75);
-            const double alpha = 1.5;
-            const double beta = -0.5;
+            constexpr double kAlpha = 1.5;
+            constexpr double kBeta = -0.5;
 
-            const Vector<double> combined = LinearCombination(alpha, x, beta, y);
+            // A(alpha x + beta y)
+            Vector<double> combined = Clone(Exec(), x);
+            Scale(Exec(), kAlpha, combined.View());
+            Axpy(Exec(), kBeta, y.View(), combined.View());
             Vector<double> lhs(kSize);
-            op.Apply(combined, lhs);
+            op.Apply(Exec(), combined.View(), lhs.View());
 
-            Vector<double> ax(kSize);
-            Vector<double> by(kSize);
+            // alpha (A x) + beta (A y)
             Vector<double> rhs(kSize);
-            op.Apply(x, ax);
-            op.Apply(y, by);
-            rhs.CopyFrom(ax);
-            rhs.Scale(alpha);
-            rhs.Axpy(beta, by);
+            Vector<double> ax(kSize);
+            Vector<double> ay(kSize);
+            op.Apply(Exec(), x.View(), ax.View());
+            op.Apply(Exec(), y.View(), ay.View());
+            Axpy(Exec(), kAlpha, ax.View(), rhs.View());
+            Axpy(Exec(), kBeta, ay.View(), rhs.View());
 
             const auto lhs_host = ToHost(lhs);
             const auto rhs_host = ToHost(rhs);
@@ -108,89 +111,67 @@ namespace numerix {
 
         TEST(OperatorPropertyTest, SymmetryHoldsForDiagonalOperator)
         {
-            const DiagonalOperator op(MakeVector(0.5, 0.25));
+            Vector<double> diagonal = MakeVector(0.5, 0.25);
+            const DiagonalOperator op(diagonal.View());
             const Vector<double> x = MakeVector(2.0, -0.25);
             const Vector<double> y = MakeVector(-1.0, 0.75);
 
             Vector<double> ax(kSize);
             Vector<double> ay(kSize);
-            op.Apply(x, ax);
-            op.Apply(y, ay);
+            op.Apply(Exec(), x.View(), ax.View());
+            op.Apply(Exec(), y.View(), ay.View());
 
-            EXPECT_NEAR(x.Dot(ay), y.Dot(ax), 1e-12);
+            EXPECT_NEAR(Dot(Exec(), x.View(), ay.View()), Dot(Exec(), y.View(), ax.View()), 1e-12);
         }
 
         TEST(OperatorPropertyTest, PositiveDefinitenessHoldsForPositiveDiagonal)
         {
-            const DiagonalOperator op(MakeVector(0.5, 0.25));
+            Vector<double> diagonal = MakeVector(0.5, 0.25);
+            const DiagonalOperator op(diagonal.View());
             const Vector<double> x = MakeVector(2.0, -0.25);
 
             Vector<double> ax(kSize);
-            op.Apply(x, ax);
+            op.Apply(Exec(), x.View(), ax.View());
 
-            EXPECT_GT(x.Dot(ax), 0.0);
+            EXPECT_GT(Dot(Exec(), x.View(), ax.View()), 0.0);
         }
 
-        TEST(AnyLinearOperatorTest, MatchesDirectApplication)
+        // 融合形式必须与非融合组合在数学上一致：y = alpha * A x + beta * y。
+        TEST(ScaledOperatorTest, FusedApplyMatchesUnfusedCombination)
         {
-            const DiagonalOperator op(MakeVector(1.0, 0.5));
-            const Vector<double> x = MakeVector(2.0, -0.25);
-
-            const AnyLinearOperator<Vector<double>> erased(op);
-
-            Vector<double> direct(kSize);
-            Vector<double> through_erasure(kSize);
-            op.Apply(x, direct);
-            erased.Apply(x, through_erasure);
-
-            EXPECT_EQ(ToHost(direct), ToHost(through_erasure));
-        }
-
-        TEST(PipelineTest, MatchesSequentialApplication)
-        {
-            const DiagonalOperator diagonal(MakeVector(1.0, 0.5));
-            const ScaleOperator scale(2.0);
-            const Vector<double> x = MakeVector(2.0, -0.25);
-
-            const auto pipeline = Compose<Vector<double>>(kSize, diagonal, scale);
-
-            Vector<double> through_pipeline(kSize);
-            pipeline.Apply(x, through_pipeline);
-
-            Vector<double> step_one(kSize);
-            Vector<double> step_two(kSize);
-            diagonal.Apply(x, step_one);
-            scale.Apply(step_one, step_two);
-
-            EXPECT_EQ(ToHost(through_pipeline), ToHost(step_two));
-        }
-
-        TEST(PipelineTest, ComposedOperatorIsStillLinear)
-        {
-            const auto pipeline = Compose<Vector<double>>(kSize, DiagonalOperator(MakeVector(1.0, 0.5)), ScaleOperator(2.0));
+            Vector<double> diagonal = MakeVector(1.0, 0.5);
+            const DiagonalOperator op(diagonal.View());
             const Vector<double> x = MakeVector(2.0, -0.25);
             const Vector<double> y = MakeVector(-1.0, 0.75);
-            const double alpha = 1.5;
-            const double beta = -0.5;
+            constexpr double kAlpha = 1.5;
+            constexpr double kBeta = -0.5;
 
-            const Vector<double> combined = LinearCombination(alpha, x, beta, y);
-            Vector<double> lhs(kSize);
-            pipeline.Apply(combined, lhs);
+            Vector<double> fused = Clone(Exec(), y);
+            op.Apply(Exec(), kAlpha, x.View(), kBeta, fused.View());
+
+            Vector<double> reference = Clone(Exec(), y);
+            Scale(Exec(), kBeta, reference.View());
+            Vector<double> ax(kSize);
+            op.Apply(Exec(), x.View(), ax.View());
+            Axpy(Exec(), kAlpha, ax.View(), reference.View());
+
+            const auto fused_host = ToHost(fused);
+            const auto reference_host = ToHost(reference);
+            for (std::size_t i = 0; i < kSize; ++i) {
+                EXPECT_NEAR(fused_host[i], reference_host[i], 1e-12);
+            }
+        }
+
+        // 不带融合形式的算子仍然满足基础契约：求解器可以按自己的 workspace 做回退。
+        TEST(OperatorTest, PlainOperatorSatisfiesBaseContract)
+        {
+            const PlainScaleOperator op(2.0);
+            const Vector<double> x = MakeVector(2.0, -0.25);
 
             Vector<double> ax(kSize);
-            Vector<double> ay(kSize);
-            Vector<double> rhs(kSize);
-            pipeline.Apply(x, ax);
-            pipeline.Apply(y, ay);
-            rhs.CopyFrom(ax);
-            rhs.Scale(alpha);
-            rhs.Axpy(beta, ay);
+            op.Apply(Exec(), x.View(), ax.View());
 
-            const auto lhs_host = ToHost(lhs);
-            const auto rhs_host = ToHost(rhs);
-            for (std::size_t i = 0; i < kSize; ++i) {
-                EXPECT_NEAR(lhs_host[i], rhs_host[i], 1e-12);
-            }
+            EXPECT_DOUBLE_EQ(Dot(Exec(), x.View(), ax.View()), 2.0 * Dot(Exec(), x.View(), x.View()));
         }
 
     } // namespace

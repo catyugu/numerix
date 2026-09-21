@@ -8,5 +8,4 @@ namespace numerix::config {
     constexpr inline int kVersionMinor = @PROJECT_VERSION_MINOR@;
     constexpr inline int kVersionPatch = @PROJECT_VERSION_PATCH@;
     constexpr inline std::string_view kVersion = "@PROJECT_VERSION@";
-    constexpr inline std::string_view kProjectRootDir = "@PROJECT_SOURCE_DIR@";
 }

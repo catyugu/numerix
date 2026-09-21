@@ -1,6 +1,5 @@
 #include <numerix/diagnostics/logger.hpp>
 
-#include <cstddef>
 #include <iostream>
 #include <ostream>
 
