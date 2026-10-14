@@ -53,6 +53,16 @@ else()
         "KokkosKernels_ENABLE_EXAMPLES OFF"
         "KokkosKernels_ENABLE_BENCHMARKS OFF"
     )
+    # KokkosKernels enables /bigobj for CUDA, but its CPU ETI sources also
+    # exceed MSVC's COFF section limit in Debug builds (C1128).
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        target_compile_options(kokkoskernels PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
+        # Its batched SIMD header contains unguarded GCC diagnostic pragmas.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            target_compile_options(kokkoskernels PRIVATE /wd4068)
+        endif()
+    endif()
+
 endif()
 
 if(NUMERIX_BUILD_TESTS AND NOT TARGET GTest::gtest)
