@@ -36,6 +36,7 @@ if(NUMERIX_USE_SYSTEM_KOKKOS)
 else()
     CPMAddPackage(
         NAME Kokkos
+        SYSTEM YES
         GITHUB_REPOSITORY kokkos/kokkos
         GIT_TAG ${NUMERIX_KOKKOS_VERSION}
         OPTIONS
@@ -46,6 +47,7 @@ else()
     )
     CPMAddPackage(
         NAME KokkosKernels
+        SYSTEM YES
         GITHUB_REPOSITORY kokkos/kokkos-kernels
         GIT_TAG ${NUMERIX_KOKKOS_VERSION}
         OPTIONS
@@ -68,6 +70,7 @@ endif()
 if(NUMERIX_BUILD_TESTS AND NOT TARGET GTest::gtest)
     CPMFindPackage(
         NAME GTest
+        SYSTEM YES
         GITHUB_REPOSITORY google/googletest
         GIT_TAG v1.17.0
         OPTIONS
