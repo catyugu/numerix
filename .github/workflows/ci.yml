@@ -53,4 +53,4 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Build, test, install and embed
-        run: python ci/run_checks.py --config ${{ matrix.config }} --generator "Ninja Multi-Config"
+        run: python ci/run_checks.py --config ${{ matrix.config }} --generator "Ninja Multi-Config" --build-root "${{ runner.temp }}/n"

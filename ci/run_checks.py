@@ -26,8 +26,11 @@ def main():
 
     def configure(source, build, *options):
         generator = ["-G", args.generator] if args.generator else []
-        run("cmake", "-S", source, "-B", build, *generator,
-            f"-DCMAKE_BUILD_TYPE={args.config}", f"-DCPM_SOURCE_CACHE={cache}", *options)
+        multi_config = args.generator == "Ninja Multi-Config" or args.generator == "Xcode" or (
+            args.generator is not None and args.generator.startswith("Visual Studio"))
+        # Kokkos also uses the requested configuration for its configure-time options.
+        build_type = [f"-DCMAKE_BUILD_TYPE={args.config}"] if source == ROOT or not multi_config else []
+        run("cmake", "-S", source, "-B", build, *generator, *build_type, *options)
 
     def check(build):
         run("cmake", "--build", build, "--config", args.config, "--parallel", "2")
@@ -36,7 +39,7 @@ def main():
 
     library = work / "library"
     configure(ROOT, library, f"-DCMAKE_INSTALL_PREFIX={original}",
-              "-DNUMERIX_WARNINGS_AS_ERRORS=ON")
+              f"-DCPM_SOURCE_CACHE={cache}", "-DNUMERIX_WARNINGS_AS_ERRORS=ON")
     check(library)
     run("cmake", "--install", library, "--config", args.config)
     if prefix.exists():

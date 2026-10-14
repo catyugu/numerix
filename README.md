@@ -110,6 +110,7 @@ python ci/run_checks.py --config Release --build-root build-ci-release
 
 可用 `--generator "Ninja Multi-Config"` 指定与 CI 一致的多配置生成器；默认使用平台原生生成器。
 Windows 使用 Ninja 时需在 Developer PowerShell / Command Prompt 内运行，CI 会自动初始化 MSVC 环境。
+Windows 建议用 `--build-root C:/n` 指定较短的构建路径，避免 Kokkos Kernels 对象文件路径过长。
 
 ## 目录结构
 
