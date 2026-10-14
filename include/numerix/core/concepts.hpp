@@ -29,6 +29,12 @@ namespace numerix {
     template <class V, class Exec = DefaultExecutionSpace>
     concept MutableDenseVector = DenseVector<V, Exec> && !std::is_const_v<typename std::remove_cvref_t<V>::value_type>;
 
+    template <class V, class Exec = DefaultExecutionSpace>
+    concept DenseMultiVector = Kokkos::is_view_v<std::remove_cvref_t<V>> && std::remove_cvref_t<V>::rank == 2 && AccessibleFrom<Exec, typename std::remove_cvref_t<V>::memory_space>;
+
+    template <class V, class Exec = DefaultExecutionSpace>
+    concept MutableDenseMultiVector = DenseMultiVector<V, Exec> && !std::is_const_v<typename std::remove_cvref_t<V>::value_type>;
+
     // View 或容器的标量类型。去掉元素类型上的 const：View<const double*> 的标量仍是 double，
     // "只读"由 MutableDenseVector 单独表达。
     template <class T>

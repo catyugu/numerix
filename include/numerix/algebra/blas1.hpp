@@ -78,4 +78,23 @@ namespace numerix {
         return Norm2(DefaultExecutionSpace {}, x);
     }
 
+    // Pairwise column inner products, not the full Gram matrix. Output stays on the given stream.
+    template <class Exec, class X, class Y, class R>
+        requires(ExecutionSpace<Exec> && DenseMultiVector<X, Exec> && DenseMultiVector<Y, Exec> && MutableDenseVector<R, Exec>
+            && Scalar<ScalarOf<X>> && std::same_as<ScalarOf<X>, ScalarOf<Y>> && std::same_as<ScalarOf<X>, ScalarOf<R>>)
+    void ColumnDots(const Exec& exec, const X& x, const Y& y, const R& result)
+    {
+        KOKKOS_ASSERT(x.extent(0) == y.extent(0));
+        KOKKOS_ASSERT(x.extent(1) == y.extent(1));
+        KOKKOS_ASSERT(result.extent(0) == x.extent(1));
+        if (result.extent(0) == 0) {
+            return;
+        }
+        if (x.extent(0) == 0) {
+            Kokkos::deep_copy(exec, result, ScalarOf<R>(0));
+            return;
+        }
+        KokkosBlas::dot(exec, result, x, y);
+    }
+
 } // namespace numerix

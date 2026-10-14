@@ -38,17 +38,46 @@
 手写循环略快（31.3 GB/s，Kokkos Serial 的逐元素调用开销属其序列后端特性，不是 numerix 的额外开销）。
 复现：`./build-release/benchmarks/numerix_axpy_bench.exe`。
 
-## 阶段 1：动态代数补齐
+## 阶段 1：动态代数补齐（已完成）
 
 - `MultiVector`：块 Krylov、多右端、POD/ROM 的基础容器
 - 稀疏算子包装 `SparseOperator`（基于 `KokkosSparse::CrsMatrix`，不自行发明 CSR）
 - 向量空间/内积语义的统一约定（实数与复数）
 
-验收：`MultiVector` 的列内积与逐列 `Vector::Dot` 一致；稀疏算子与逐行手工计算结果一致。
+验收（2026-10-14，Linux / GCC 13.3.0，Kokkos / Kokkos Kernels 5.2.2，Serial）：
+
+- [x] `MultiVector` 的列内积与逐列 `Dot(exec, vector.View(), ...)` 一致，支持跨步视图与复数共轭。
+- [x] move-only、只读 View、Clone / DeepCopy 独立存储与空尺寸语义通过验证。
+- [x] `SparseOperator` 的矩形乘法、空行、零矩阵与手算一致，复数乘法不错误共轭。
+- [x] 线性性、Hermitian 对称性、正定性、融合 Apply 和块乘法与逐列结果一致。
+- [x] CSR offset 接受原生有符号整数与 `std::size_t`，ordinal / offset 独立。
+- [x] Debug 与 Release 零编译警告（`-Wall -Wextra -Wpedantic -Werror`），CTest 均 34/34。
+- [x] Debug 与 Release 的安装迁移消费和父项目嵌入均通过，新 API 纳入消费者测试。
+- [x] 新头文件独立包含可编译，修改的 C++ 文件通过 clang-format 检查。
+
+TDD 记录（最终新增 13 项测试）：先添加数学性质与数据契约测试，缺失头文件导致编译失败；
+最小实现后首次 CTest 为 32/33，空列 dot 触发 Kokkos 多向量 reduction 的数值异常。
+保留失败测试，以空列直接返回、空行 deep_copy 零值修复。
+随后新增原生 `int` offset 测试，确认 unsigned-only 约束编译失败，再放宽为非 bool 整数。
+全部通过后，将稀疏 Apply 重构为显式 `SPMV_NATIVE` 的栈上 handle，重跑全套验证。
+
+复现：
+
+```bash
+cmake -S . -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNUMERIX_WARNINGS_AS_ERRORS=ON
+cmake --build build-debug --parallel 2
+ctest --test-dir build-debug --output-on-failure
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DNUMERIX_WARNINGS_AS_ERRORS=ON
+cmake --build build-release --parallel 2
+ctest --test-dir build-release --output-on-failure
+```
+
+下一步：阶段 2 先按 TDD 实现带显式执行流的 CG、Identity 预条件子与收敛结果；
+先验证已知谱 SPD 系统和复数 Hermitian 正定系统，再扩展其他迭代法。
 
 ## 阶段 2：线性求解器
 
-- 接口：`SolveResult Solve(const A&, const X& b, X& x)`
+- 接口：`SolveResult Solve(exec, const A&, const X& b, X& x)`
 - 迭代法：CG、MINRES、GMRES、FGMRES、BiCGStab
 - 预条件子：Identity、Jacobi、BlockJacobi、ILU(0)
 - 收敛准则：相对残差、绝对残差与最大迭代次数，`ConvergenceMonitor` 记录残差历史
@@ -84,7 +113,7 @@
 
 ## 待办与风险
 
-- 本机为 clang-cl + Ninja，需在 GCC/OpenMP 环境复验构建与测试。
+- GCC 13.3.0 / Serial 的 Debug 与 Release 已复验；OpenMP 与设备后端仍需对应环境验证。
 - Windows 上 clang++（GNU 驱动）无法构建 KokkosKernels 5.2.2（它按 `CMAKE_CXX_SIMULATE_ID`
   判定 MSVC ABI 并注入 `/EHsc`），numerix 在配置阶段直接报错并给出替代方案；
   若上游修好该判定，可去掉 `cmake/Dependencies.cmake` 里的这道前置检查。

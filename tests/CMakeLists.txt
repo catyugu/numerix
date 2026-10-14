@@ -3,6 +3,8 @@ add_executable(numerix_tests
     test_core.cpp
     test_vector.cpp
     test_operator.cpp
+    test_multivector.cpp
+    test_sparse_operator.cpp
 )
 
 target_link_libraries(numerix_tests

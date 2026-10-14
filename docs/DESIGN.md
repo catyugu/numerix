@@ -3,7 +3,7 @@
 > C++20 + Kokkos-native 的通用科学计算基础库。numerix 不提供 FEM/FVM/BEM 框架，
 > 而提供所有离散方法共享的数值执行模型。
 
-状态：骨架已落地（v0.1，含 Kokkos-native 纠偏）。本文件是唯一的设计记录；
+状态：阶段 1 动态代数已落地（v0.1，含 Kokkos-native 纠偏）。本文件是唯一的设计记录；
 与代码不一致时以本文件为准并同步修正代码。
 
 ## 1. 设计目标
@@ -47,8 +47,8 @@ include/numerix/
 ├── core/          scalar（ScalarTraits）/ concepts（Kokkos 概念再导出 + numerix 概念）
 ├── execution/     Kokkos 执行空间别名
 ├── memory/        Kokkos 内存空间别名
-├── algebra/       blas1 / StaticVector / StaticMatrix / Vector（后续：MultiVector、稀疏包装）
-├── operator/      LinearOperatorFor 编译期算子契约
+├── algebra/       blas1 / StaticVector / StaticMatrix / Vector / MultiVector
+├── operator/      LinearOperatorFor 编译期算子契约 / SparseOperator
 ├── solver/        线性与非线性求解器（后续）
 ├── numerics/      时间积分等数值方法（后续）
 ├── distributed/   MPI 层（后续，可选依赖）
@@ -158,6 +158,20 @@ public:
 - `const Vector` 只能交出 `const_view_type`，与 Kokkos 的 `View<double*>`（const 句柄、可写数据）与
   `View<const double*>`（只读数据）区分一致。
 
+### 5.3.1 MultiVector：列向量的 owning 存储
+
+`MultiVector<T, Mem>` 遵循 Vector 的 move-only 与 const 语义。`View()` 返回
+`Kokkos::View<T**, Kokkos::LayoutLeft, Mem>`，维度为 `(Rows(), Columns())`，
+不引入独立的列访问或数学成员接口。列、块与别名直接通过 `Kokkos::subview` 表达。
+`Clone(exec, x)` 分配独立存储，`DeepCopy(exec, dst, src)` 要求两个维度一致。
+
+`DenseMultiVector` / `MutableDenseMultiVector` 分别约束 rank-2 View 的可访问性与可写性。
+`ColumnDots(exec, x, y, result)` 将相同尺寸多向量的对应列内积写入 rank-1 输出，
+调用 KokkosBlas 的多向量 dot；它不是 `X^H Y`，不做单列广播。
+输出与输入不得重叠。零行的内积为零，零列返回空结果。
+标量类型必须一致，复数第一参数共轭，遵循向量已有的 Euclidean 内积约定。
+操作使用显式 execution-space instance；输出返回主机前需由调用方 fence。
+
 ### 5.4 BLAS-1：numerix 定接口，Kokkos Kernels 出内核
 
 ```cpp
@@ -201,6 +215,27 @@ concept ScaledLinearOperatorFor = LinearOperatorFor<Op, Exec, X, Y> &&
 `y = alpha A x + beta y` 在 Krylov 迭代里很常见，KokkosSparse 的 `spmv` 原生支持这种形式。
 不要求所有算子实现它；回退路径（`Apply` + `Axpby`）需要调用方提供 workspace，
 因此 dispatcher 与 workspace 所有权一起留给求解器阶段（见 D-3）。
+
+### 5.5.1 SparseOperator：原生 CSR 的算子适配
+
+`SparseOperator<T, Ordinal, Mem, Offset>` 的 `matrix_type` 是原生
+`KokkosSparse::CrsMatrix<T, Ordinal, Kokkos::Device<Mem::execution_space, Mem>, void, Offset>`。
+默认 local ordinal 为 `int`，默认 CSR offset 为 `std::size_t`，两者独立；
+也接受 Kokkos 原生的有符号整数 offset（例如 `int`），不强制转换 CSR。
+`Rows()` / `Columns()` 返回 `std::size_t`，矩阵形状沿用 CSR 的 ordinal 类型，
+不通过 int 中间量窄化。CSR 的合法性由创建矩阵的调用方保证。
+
+适配器持有只读值类型的 CSR 句柄，不重新实现存储，也不进行隐式深拷贝。
+它延长底层 allocation 的生命周期；外部已有别名仍可修改该 allocation，
+调用方必须保证 Apply 执行期间矩阵不变。输入、输出 View 不得重叠。
+
+`Apply(exec, x, y)` 与 `Apply(exec, alpha, x, beta, y)` 分别执行
+`y = A x` 与 `y = alpha A x + beta y`，均交给 KokkosSparse::spmv。
+核心适配器显式选择 `SPMV_NATIVE`，使用栈上的临时 handle，
+不持有可变缓存，也不在 Apply 中初始化外部 TPL 资源；外部后端优化留给 adapter。
+rank-1 与 rank-2 输入输出必须对应；rank-2 的列数相同，矩形矩阵要求
+输入行数等于 Columns，输出行数等于 Rows。类型约束拒绝不可访问内存、只读输出、
+不同标量和不同 rank；尺寸是运行期契约。
 
 ### 5.6 索引类型：区分 size / local ordinal / global ordinal
 

@@ -49,6 +49,39 @@ ctest --test-dir build --output-on-failure
 cmake -S . -B build -G "Ninja" -DNUMERIX_USE_SYSTEM_KOKKOS=ON
 ```
 
+## 动态代数
+
+`Vector` 与 `MultiVector` 都是 owning、move-only 存储；通过 `Clone(exec, x)` 或
+`DeepCopy(exec, dst, src)` 显式复制。`MultiVector` 的行是分量，列是独立向量，采用
+`LayoutLeft` 保持列连续。列视图直接参与现有 BLAS-1 运算：
+
+```cpp
+numerix::DefaultExecutionSpace exec;
+numerix::MultiVector<double> x(100, 4);
+Kokkos::deep_copy(exec, x.View(), 2.0);
+auto y = numerix::Clone(exec, x);
+auto column = Kokkos::subview(y.View(), Kokkos::ALL, 0);
+numerix::Scale(exec, 3.0, column);
+numerix::Vector<double> dots(4);
+numerix::ColumnDots(exec, x.View(), y.View(), dots.View());
+exec.fence();
+```
+
+上述代码须在 Kokkos 初始化与终结之间运行。`ColumnDots` 计算对应列的内积，
+不是完整 Gram 矩阵；实数与复数统一使用 `sum(conj(x(i,j)) * y(i,j))`。
+它接受只读输入和跨步视图，结果留在输出 View 中，读取前由调用方同步执行流。
+
+`SparseOperator<T, Ordinal, Mem, Offset>` 接受其 `matrix_type`（原生
+`KokkosSparse::CrsMatrix`），共享 CSR 存储而不复制数据，提供：
+
+```cpp
+op.Apply(exec, x.View(), y.View());                   // y = A x
+op.Apply(exec, alpha, x.View(), beta, y.View());      // y = alpha A x + beta y
+```
+
+输入与输出既可为 rank-1 向量，也可为 rank-2 多向量；稀疏矩阵可以是矩形。
+输入输出不得重叠，CSR 必须有效，执行期间不得通过外部别名修改矩阵。
+
 ## 安装与使用
 
 ```bash

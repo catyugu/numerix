@@ -7,10 +7,12 @@
 #include <numerix/memory/memory_space.hpp>
 
 #include <numerix/algebra/blas1.hpp>
+#include <numerix/algebra/multivector.hpp>
 #include <numerix/algebra/static_matrix.hpp>
 #include <numerix/algebra/static_vector.hpp>
 #include <numerix/algebra/vector.hpp>
 
 #include <numerix/operator/linear_operator.hpp>
+#include <numerix/operator/sparse_operator.hpp>
 
 #include <numerix/diagnostics/logger.hpp>
