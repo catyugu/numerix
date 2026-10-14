@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.26)
+project(numerix_superproject VERSION 9.8.7 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(_parent_build_type "${CMAKE_BUILD_TYPE}")
+set(_parent_version "${CMAKE_PROJECT_VERSION}")
+enable_testing()
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../.." numerix-build)
+# A second inclusion must reuse the existing target.
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../.." numerix-again)
+if(NOT CMAKE_CXX_STANDARD EQUAL 17
+   OR NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${_parent_build_type}"
+   OR NOT "${CMAKE_PROJECT_VERSION}" STREQUAL "${_parent_version}")
+    message(FATAL_ERROR "numerix changed parent build policy")
+endif()
+foreach(_option NUMERIX_BUILD_TESTS NUMERIX_BUILD_EXAMPLES NUMERIX_BUILD_BENCHMARKS NUMERIX_WARNINGS_AS_ERRORS)
+    if(${_option})
+        message(FATAL_ERROR "${_option} should default to OFF in a parent project")
+    endif()
+endforeach()
+add_executable(superapp ../consumer/main.cpp)
+target_link_libraries(superapp PRIVATE numerix::numerix)
+add_test(NAME superproject.smoke COMMAND superapp)

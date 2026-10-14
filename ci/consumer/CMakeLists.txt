@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.26)
+project(numerix_consumer LANGUAGES CXX)
+find_package(numerix 0.1 REQUIRED CONFIG)
+add_executable(consumer main.cpp)
+target_link_libraries(consumer PRIVATE numerix::numerix)
+enable_testing()
+add_test(NAME consumer.smoke COMMAND consumer)

@@ -1,11 +1,13 @@
+#pragma once
+
 #include <string_view>
 
 // clang-format off
 namespace numerix::config {
 
     constexpr inline std::string_view kProjectName = "@PROJECT_NAME@";
-    constexpr inline int kVersionMajor = @PROJECT_VERSION_MAJOR@;
-    constexpr inline int kVersionMinor = @PROJECT_VERSION_MINOR@;
-    constexpr inline int kVersionPatch = @PROJECT_VERSION_PATCH@;
-    constexpr inline std::string_view kVersion = "@PROJECT_VERSION@";
+    constexpr inline int kVersionMajor = @NUMERIX_VERSION_MAJOR@;
+    constexpr inline int kVersionMinor = @NUMERIX_VERSION_MINOR@;
+    constexpr inline int kVersionPatch = @NUMERIX_VERSION_PATCH@;
+    constexpr inline std::string_view kVersion = "@NUMERIX_VERSION@";
 }

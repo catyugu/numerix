@@ -302,13 +302,12 @@ NUMERIX_LOG_DEBUG(logger, "iteration residual");
   （加 host 变体），避免与 `Kokkos::Device` 及 `KokkosSparse` 的 `Device` 混淆。
 - D-8 索引类型：区分 `size_type` / local ordinal / global ordinal，禁止把 extent 窄化成 `int`；
   RangePolicy 索引类型跟随 View 的 `index_type`。
-- D-9 CMake 使用需求收缩：`numerix_options` 只保留 `cxx_std_20`、解析公共头文件必需的
-  MSVC 开关与 `NUMERIX_DEBUG` 定义；优化级别、`-fPIC`（改为目标属性 `POSITION_INDEPENDENT_CODE`）、
-  `-rdynamic`、`-fno-strict-aliasing`、覆盖率、构建类型、并行度、`compile_commands` 全部移除或
-  限制在 `PROJECT_IS_TOP_LEVEL` 内。子项目默认不构建 tests/examples/benchmarks，
-  且不再使用 `CMAKE_SOURCE_DIR`（子项目下那是父项目的目录）。
-- D-10 警告传播：编译告警是 PRIVATE 需求，不通过 PUBLIC 传播给使用方；
-  `numerix_options` 只承载使用方必须满足的条件。
+- D-9 CMake 使用需求：通过 `numerix::numerix` 发布 C++20、Kokkos 依赖与 `NUMERIX_DEBUG`；
+  警告、MSVC 源码编译开关、调试与覆盖率选项由仅用于构建树的私有 `numerix_options` 承载。
+  不覆盖优化级别；PIC 使用目标属性。构建类型与编译数据库只在顶层设置，并行度由调用方指定。
+  子项目默认不构建 tests/examples/benchmarks，不启用警告报错；CTest 由父项目开启。
+- D-10 CMake 兼容性：最低版本 3.26；编译器前端在配置期识别，避免使用 3.30 才有的生成器表达式。
+  CPM 优先复用父项目已有命令，下载缓存默认只在顶层设置。
 - D-11 命名规范：早期草案中的 `apply/dot/norm` 小写下划线风格改为 Google Style 的
   `Apply/Dot/Norm`。
 - D-12 定长代数命名：`StaticVector` / `StaticMatrix`（而非 `Vector<T, 3>` 特化），
@@ -318,9 +317,10 @@ NUMERIX_LOG_DEBUG(logger, "iteration residual");
 - D-15 本机工具链：开发机使用 clang-cl（VS 2022 工具链）+ Ninja；GCC/OpenMP 与设备后端待补验证。
 - D-16 基准方法：每个变体取多轮中的最优一轮（共享/虚拟化机器上单次测量波动可达 30%），
   并且始终同时测量裸 Kokkos kernel 与手写循环，作为零开销抽象的对照基线。
-- D-17 安装导出：`numerix_options` / `numerix_warnings` 与 numerix 同属一个导出集；
+- D-17 安装导出：仅导出 numerix，不导出开发选项目标；`NUMERIX_INSTALL` 控制本项目安装规则。
   依赖由 CPM 拉取时随安装一并导出，使用方通过 `find_dependency(Kokkos)` /
-  `find_dependency(KokkosKernels)` 获得。
+  `find_dependency(KokkosKernels)` 获得。版本头文件统一为 `<numerix/config.h>`，0.x 使用 SameMinorVersion。
+  当前 numerix 保持静态库，构建树与安装包都提供 `numerix::numerix`。
 
 ## 11. 最终架构
 

@@ -8,7 +8,7 @@ numerix 不提供 FEM/FVM/BEM 框架，而提供所有离散方法共享的数�
 
 ## 要求
 
-- CMake >= 3.24
+- CMake >= 3.26
 - 支持 C++20 的编译器（GCC / Clang / MSVC）
 - 推荐生成器：Ninja
 
@@ -29,7 +29,7 @@ cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug \
 
 ```bash
 cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ```
 
@@ -82,6 +82,30 @@ uv tool run --from clang-format clang-format -i include/numerix/*.hpp include/nu
 | `NUMERIX_BUILD_BENCHMARKS`   | ON   | 构建基准程序                             |
 | `NUMERIX_USE_SYSTEM_KOKKOS`  | OFF  | 使用已安装的 Kokkos 而非 CPM 拉取        |
 | `NUMERIX_WARNINGS_AS_ERRORS` | ON   | numerix 自身目标把警告视为错误           |
+| `NUMERIX_INSTALL`            | ON   | 生成 numerix 安装与包导出规则           |
+| `NUMERIX_ENABLE_COVERAGE`    | OFF  | GCC/Clang GNU 前端的 Debug 覆盖率       |
+
+作为子项目时，示例、测试、基准与警告报错默认关闭；构建类型、优化级别、并行度由父项目决定。
+构建树和安装包都提供 `numerix::numerix`。当前 numerix 仍为静态库，不受 `BUILD_SHARED_LIBS` 影响。
+`NUMERIX_INSTALL=OFF` 只关闭 numerix 的安装规则，依赖的安装规则由依赖自身控制。
+生成的版本头文件使用 `<numerix/config.h>`，构建树与安装包的路径一致。
+0.x 版本按 minor 版本判断兼容性。
+
+## 持续集成
+
+GitHub Actions 在 Linux（GCC、Clang）、macOS（AppleClang）、Windows（MSVC）上分别检查
+Debug 与 Release，使用 CMake 3.26.4 验证最低版本。每个任务构建全部测试、示例与基准，运行 CTest，
+再验证移动安装目录后的 `find_package` 消费者，以及使用系统 Kokkos 的 `add_subdirectory` 集成。
+后者还检查父项目设置不被修改、重复引入可复用目标、开发目标默认关闭。
+
+本地运行相同步骤：
+
+```bash
+python ci/run_checks.py --config Debug
+python ci/run_checks.py --config Release --build-root build-ci-release
+```
+
+可用 `--generator Ninja` 指定生成器；默认使用平台原生生成器，Windows 不要求手动初始化 MSVC 环境。
 
 ## 目录结构
 

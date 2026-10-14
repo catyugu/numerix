@@ -1,7 +1,15 @@
 # 集中依赖声明。Kokkos Core 与 Kokkos Kernels 都是必需依赖：
 # Kokkos 提供执行空间、内存空间与 View，Kokkos Kernels 提供 portable BLAS 与稀疏容器。
 # numerix 只在其上定义科学计算语义，不重写成熟 kernel（见 docs/DESIGN.md）。
-include(CPM)
+if(PROJECT_IS_TOP_LEVEL)
+    set(CPM_SOURCE_CACHE "${PROJECT_SOURCE_DIR}/.cache/cpm" CACHE PATH "CPM source cache")
+endif()
+
+set(CPM_DONT_UPDATE_MODULE_PATH ON)
+set(CPM_DONT_CREATE_PACKAGE_LOCK ON)
+if(NOT COMMAND CPMAddPackage)
+    include("${CMAKE_CURRENT_LIST_DIR}/CPM.cmake")
+endif()
 
 # Kokkos 与 Kokkos Kernels 必须版本同步，因此共用一个 tag。
 set(NUMERIX_KOKKOS_VERSION "5.2.2" CACHE STRING "pinned Kokkos / Kokkos Kernels release tag")
@@ -47,17 +55,20 @@ else()
     )
 endif()
 
-if(NUMERIX_BUILD_TESTS)
-    CPMAddPackage(
-        NAME googletest
+if(NUMERIX_BUILD_TESTS AND NOT TARGET GTest::gtest)
+    CPMFindPackage(
+        NAME GTest
         GITHUB_REPOSITORY google/googletest
         GIT_TAG v1.17.0
         OPTIONS
         "BUILD_GMOCK OFF"
         "INSTALL_GTEST OFF"
+        "BUILD_SHARED_LIBS OFF"
+        "gtest_force_shared_crt ON"
     )
     # googletest 自带 /WX，其 char8_t 打印路径在 clang 22 上触发 -Wcharacter-conversion。
-    if(TARGET gtest)
+    if(TARGET gtest AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 22)
         target_compile_options(gtest PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-character-conversion>)
     endif()
 endif()

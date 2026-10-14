@@ -5,7 +5,7 @@
 #include <string>
 #include <type_traits>
 
-#include <config.h>
+#include <numerix/config.h>
 #include <numerix/numerix.hpp>
 
 namespace numerix {

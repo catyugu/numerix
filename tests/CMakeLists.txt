@@ -5,12 +5,10 @@ add_executable(numerix_tests
     test_operator.cpp
 )
 
-target_include_directories(numerix_tests PRIVATE ${PROJECT_BINARY_DIR})
-
 target_link_libraries(numerix_tests
     PRIVATE
         numerix
-        numerix_warnings
+        numerix_options
         GTest::gtest
 )
 

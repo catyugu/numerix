@@ -69,3 +69,5 @@ Testing/
 
 # ide specific files
 .vscode/
+# Python CI helper
+__pycache__/
