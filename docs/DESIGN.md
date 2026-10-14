@@ -102,7 +102,14 @@ struct ScalarTraits<Kokkos::complex<T>> {
 
 - 复数标量是 `Kokkos::complex`，不是 `std::complex`：后者在设备端不可用。
 - `Scalar` 概念由"存在合法 traits"定义，而不是由 `is_floating_point || is_std_complex` 定义；
-  half/bfloat、AD 标量、混合精度以后加特化即可，不需要改动概念体系。
+  它检查 real_type 是无 cv/ref 的对象类型，以及 Conj / SquaredMagnitude 的结果能转换为相应值类型，
+  不要求 traits 提供未被使用的别名，不把所有算术能力都放进 Scalar。
+- `Conj` 将 traits 结果转换为无 cv/ref 的标量值；即使显式指定引用类型，也不交出悬空引用。
+  两个标量辅助函数的 noexcept 跟随实际 traits 调用和结果转换。
+- `ScalarElement<T>` 在 Scalar 基础上要求 T 是无 cv/ref 的值类型，供 owning 容器使用；
+  只读数据通过 const 容器或 const View 表达。
+- 新标量可增加 ScalarTraits，但这只建立 numerix 语义。动态 BLAS / 稀疏乘法还需要完整的
+  Kokkos Kernels ArithTraits 支持；traits 注册不能代替目标执行后端的真实编译与数学验证。
 - 内核只通过 `ScalarTraits` 取实部类型与共轭/模平方语义（`RealOfT<T>`、`Conj`、`SquaredMagnitude`），
   这三个函数都是 `KOKKOS_INLINE_FUNCTION constexpr`。
 
@@ -142,7 +149,7 @@ concept MutableDenseVector = DenseVector<V, Exec> && !std::is_const_v<typename V
 `numerix::Vector` 是 **owning、move-only 的存储**，没有数学成员函数：
 
 ```cpp
-template <Scalar T, MemorySpace Mem = DefaultMemorySpace>
+template <ScalarElement T, MemorySpace Mem = DefaultMemorySpace>
 class Vector {
 public:
     using view_type = Kokkos::View<T*, Mem>;
@@ -194,6 +201,17 @@ Scale(exec, alpha, x);      Axpy(exec, alpha, x, y);
 Dot(exec, x, y);            Norm2(exec, x);
 ```
 
+- `DenseVector` / `DenseMultiVector` 只检查本地 View 的结构。数值运算另要求
+  `KokkosScalar<T>`：有效的 ScalarElement，且 Kokkos Kernels 已注册 ArithTraits。
+  整数 View、只有 numerix traits 的类型，以及当前 Kokkos Kernels 未支持的 complex<long double>
+  不得通过动态数值运算的调用约束；存储能力与数值内核能力分开判断。
+- Axpy 的系数类型是输入标量类型，与 Kokkos axpby 的系数转换规则一致。
+  `AxpyCompatibleScalars` 检查简化系数分支和通用表达式所需的赋值、取负与乘加兼容性。
+  支持可执行的混合类型，例如 float 输入、double 输出，或 double 输入、complex<double> 输出和实数系数；
+  不接受 complex 输入写入实数输出，也不接受实数输入配复数系数。
+  系数及输入乘法遵循输入标量精度，不承诺按输出精度完成整个表达式。
+- Dot / ColumnDots 保持同一输入标量类型的契约；Norm2 要求后端 magnitude 可转换为 RealOfT，
+  并按 RealOfT 返回结果。对自定义 traits，声明有效、定义完整、数学语义及设备可调用性仍需真实验证。
 - 每个操作显式接收 execution-space instance。同一内存空间配不同 instance 就是不同的
   CUDA/HIP/SYCL stream/queue，这是计算/通信重叠、MPI halo overlap、多流与异步流水线的前提；
   执行流不能由 `y` 隐含决定。
@@ -250,6 +268,8 @@ concept ScaledLinearOperatorFor = LinearOperatorFor<Op, Exec, X, Y> &&
 `Rows()` / `Columns()` 返回 `std::size_t`，矩阵形状沿用 CSR 的 ordinal 类型，
 不通过 int 中间量窄化。CSR 的合法性由创建矩阵的调用方保证。
 
+构造函数接收 `const_matrix_type`，即 matrix_type 的原生 const_type；可写 CSR 可以隐式转换为该只读句柄，
+原生只读 CSR 可以直接接入，不要求先获得可写数据。Apply 另要求 KokkosScalar<T>。
 适配器持有只读值类型的 CSR 句柄，不重新实现存储，也不进行隐式深拷贝。
 它延长底层 allocation 的生命周期；外部已有别名仍可修改该 allocation，
 调用方必须保证 Apply 执行期间矩阵不变。输入、输出 View 不得重叠。
@@ -350,6 +370,10 @@ MPI 及其数据类型只出现在可选 adapter / distributed 实现中，不�
 4. 组合优于继承；模块之间依赖接口与共同数据结构，不依赖彼此的具体实现。
 5. 任何进入 kernel 的 numerix 函数必须是 `KOKKOS_INLINE_FUNCTION`（能 constexpr 的一律 constexpr）。
 
+定长向量的乘法系数使用无重复推导的目标标量类型，允许可隐式转换的系数，例如
+`2 * StaticVector<double>` 和 `2.0 * StaticVector<complex<double>>`；结果保持向量元素类型。
+不为此建立通用表达式模板系统。算子仍采用成员 Apply 约定，本次约束修复不改变调用入口。
+
 ## 7. 命名与风格
 
 沿用 Google Style C++：类型/概念/函数 PascalCase，变量与文件名 snake_case，
@@ -371,6 +395,9 @@ MPI 及其数据类型只出现在可选 adapter / distributed 实现中，不�
 - 融合算子语义：`Apply(exec, alpha, x, beta, y)` 与 `alpha (A x) + beta y` 一致
 - 所有权与 const 语义：`Vector` 不可拷贝、移动转移所有权、`const Vector` 只给 `const` View
 - 定长代数在编译期求值（实数与复数都覆盖）
+- 泛型边界：残缺或错误 traits、引用 / const owning 元素、未注册的后端标量、整数 BLAS、
+  不兼容 Axpy 组合与只读输出应在调用边界被拒绝；同时验证合法 traits 的引用结果、独立自定义标量存储、
+  可执行的混合类型 Axpy、可转换定长系数及原生只读 CSR。
 - 求解器代数接口（阶段 2 首步）：用本地实现和受控的分区测试代数实现验证工作向量创建、
   完整内积、范数与收敛判断；样例必须能区分仅本地归约与完整向量结果，不能仅凭调用计数验收。
   该测试不冒充 MPI 正确性验证。
@@ -430,6 +457,10 @@ MPI 及其数据类型只出现在可选 adapter / distributed 实现中，不�
 - D-18 分布式语义前置（2026-10-14）：本地容器与 View 内核保持本地职责；分布式数学语义现在确定，
   MPI 实现留到阶段 4。阶段 2 首先随 CG 引入静态绑定的代数操作接口，求解器不写死本地 View、
   owning 容器或本地归约。执行空间由调用方显式绑定，所有权、全局归约、分布兼容性与完成条件见 §5.9。
+
+- D-19 泛型能力边界（2026-10-14）：Scalar 管理 traits 语义，ScalarElement 管理 owning 元素类型，
+  KokkosScalar 管理动态内核注册前提；每个运算另约束它实际需要的类型组合。
+  不用统一 Scalar 概念代替所有后端能力检查，也不通过无条件 same_as 禁止可执行的混合类型运算。
 
 ## 11. 最终架构
 

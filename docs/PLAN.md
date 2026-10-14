@@ -75,6 +75,15 @@ cmake --build build-release --parallel 2
 ctest --test-dir build-release --output-on-failure
 ```
 
+阶段 1 泛型约束修复（2026-10-14）：
+
+- 补齐 Scalar 的表达式与返回类型约束，owning 容器拒绝 cv/ref 元素类型；标量辅助函数返回值而非引用。
+- 动态数值内核检查 Kokkos ArithTraits 注册；存储自定义标量不额外要求后端算术支持。
+- Axpy 按真实后端系数类型和表达式能力约束混合组合，定长向量允许可转换系数，SparseOperator 接受原生只读 CSR。
+- TDD：先新增编译期拒绝测试和数学正向测试，确认原实现失败；再修复，最后执行完整回归。
+  新增 5 项运行期 / constexpr 数学测试及编译期拒绝断言，Debug / Release 均 39/39 通过。
+  算子的成员 Apply 入口保持现有约定。具体边界见 DESIGN.md §5.1 / §5.4。
+
 下一步：阶段 2 首先按 TDD 将求解器代数契约与 CG 一起落地（见 DESIGN.md §5.9），
 再扩展预条件子和其他迭代法。现有 View 运算保留本地语义；本次只确定文档约定，
 没有新增求解器、代数操作对象或 MPI 实现。

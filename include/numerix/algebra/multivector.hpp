@@ -9,7 +9,7 @@
 namespace numerix {
 
     // Rows are vector entries; columns are independent vectors. LayoutLeft keeps columns contiguous.
-    template <Scalar T, MemorySpace Mem = DefaultMemorySpace>
+    template <ScalarElement T, MemorySpace Mem = DefaultMemorySpace>
     class MultiVector {
     public:
         using value_type = T;
@@ -37,14 +37,14 @@ namespace numerix {
         view_type values_;
     };
 
-    template <class Exec, Scalar T, MemorySpace Mem>
+    template <class Exec, ScalarElement T, MemorySpace Mem>
         requires AccessibleFrom<Exec, Mem>
     void DeepCopy(const Exec& exec, MultiVector<T, Mem>& dst, const MultiVector<T, Mem>& src)
     {
         Kokkos::deep_copy(exec, dst.View(), src.View());
     }
 
-    template <class Exec, Scalar T, MemorySpace Mem>
+    template <class Exec, ScalarElement T, MemorySpace Mem>
         requires AccessibleFrom<Exec, Mem>
     MultiVector<T, Mem> Clone(const Exec& exec, const MultiVector<T, Mem>& x)
     {

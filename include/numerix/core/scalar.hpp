@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <type_traits>
 
 #include <Kokkos_Complex.hpp>
@@ -8,8 +9,7 @@
 namespace numerix {
 
     // 一个类型是 numerix 标量，当且仅当它有合法的 ScalarTraits 特化。内核只通过 traits 取
-    // 实部类型与共轭/模平方语义，因此 half/bfloat、AD 标量或混合精度可以后加特化，
-    // 不需要改动概念体系本身。
+    // 实部类型与共轭/模平方语义；动态代数还要求 Kokkos Kernels 支持相应类型。
     template <class T>
     struct ScalarTraits;
 
@@ -52,7 +52,18 @@ namespace numerix {
     };
 
     template <class T>
-    concept Scalar = requires { typename ScalarTraits<std::remove_cvref_t<T>>::real_type; };
+    concept Scalar = requires(const std::remove_cvref_t<T>& value) {
+        typename ScalarTraits<std::remove_cvref_t<T>>::real_type;
+        requires std::is_object_v<typename ScalarTraits<std::remove_cvref_t<T>>::real_type>;
+        requires std::same_as<typename ScalarTraits<std::remove_cvref_t<T>>::real_type,
+            std::remove_cvref_t<typename ScalarTraits<std::remove_cvref_t<T>>::real_type>>;
+        { ScalarTraits<std::remove_cvref_t<T>>::Conj(value) } -> std::convertible_to<std::remove_cvref_t<T>>;
+        { ScalarTraits<std::remove_cvref_t<T>>::SquaredMagnitude(value) } -> std::convertible_to<typename ScalarTraits<std::remove_cvref_t<T>>::real_type>;
+    };
+
+    // Owning storage uses unqualified value types; read-only access is expressed by a const View.
+    template <class T>
+    concept ScalarElement = Scalar<T> && std::same_as<T, std::remove_cvref_t<T>>;
 
     // 复数标量对应的实标量类型（Kokkos::complex<double> 对应 double）。
     template <Scalar T>
@@ -60,16 +71,16 @@ namespace numerix {
 
     // 实标量的共轭是自身。内积依赖它统一实数与复数语义。
     template <Scalar T>
-    KOKKOS_INLINE_FUNCTION constexpr T Conj(const T& value) noexcept
+    KOKKOS_INLINE_FUNCTION constexpr std::remove_cvref_t<T> Conj(const T& value) noexcept(noexcept(static_cast<std::remove_cvref_t<T>>(ScalarTraits<std::remove_cvref_t<T>>::Conj(value))))
     {
-        return ScalarTraits<std::remove_cvref_t<T>>::Conj(value);
+        return static_cast<std::remove_cvref_t<T>>(ScalarTraits<std::remove_cvref_t<T>>::Conj(value));
     }
 
     // |x|^2：实标量取平方，复数取模平方。
     template <Scalar T>
-    KOKKOS_INLINE_FUNCTION constexpr RealOfT<T> SquaredMagnitude(const T& value) noexcept
+    KOKKOS_INLINE_FUNCTION constexpr RealOfT<T> SquaredMagnitude(const T& value) noexcept(noexcept(static_cast<RealOfT<T>>(ScalarTraits<std::remove_cvref_t<T>>::SquaredMagnitude(value))))
     {
-        return ScalarTraits<std::remove_cvref_t<T>>::SquaredMagnitude(value);
+        return static_cast<RealOfT<T>>(ScalarTraits<std::remove_cvref_t<T>>::SquaredMagnitude(value));
     }
 
 } // namespace numerix

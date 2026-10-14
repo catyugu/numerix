@@ -83,6 +83,11 @@ op.Apply(exec, alpha, x.View(), beta, y.View());      // y = alpha A x + beta y
 输入与输出既可为 rank-1 向量，也可为 rank-2 多向量；稀疏矩阵可以是矩形。
 输入输出不得重叠，CSR 必须有效，执行期间不得通过外部别名修改矩阵。
 
+动态 BLAS 与稀疏乘法还检查 Kokkos Kernels 的标量注册，单独提供 ScalarTraits 不等于后端支持。
+Axpy 系数采用输入标量类型；允许后端可执行的混合类型更新，如 float 到 double，
+或实数输入、复数输出与实数系数。原生只读 CSR 可直接构造 SparseOperator。
+定长向量的系数允许隐式转换，例如 `2 * StaticVector<double>`。
+
 ## 安装与使用
 
 ```bash

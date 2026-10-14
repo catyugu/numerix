@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
 
 #include <Kokkos_Array.hpp>
 #include <Kokkos_Macros.hpp>
@@ -14,7 +15,7 @@ namespace numerix {
     // 所有操作都是 KOKKOS_INLINE_FUNCTION：StaticVector 最重要的使用场景就是 element/cell
     // kernel，若它不能安全进入 CUDA/HIP/SYCL kernel，这个模块就失去大半意义。
     // 存储用 Kokkos::Array 而不是 std::array：前者是 Kokkos 的设备端可移植版本。
-    template <Scalar T, std::size_t N>
+    template <ScalarElement T, std::size_t N>
     class StaticVector {
     public:
         using value_type = T;
@@ -101,26 +102,26 @@ namespace numerix {
         Kokkos::Array<T, N> values_ {};
     };
 
-    template <Scalar T, std::size_t N>
+    template <ScalarElement T, std::size_t N>
     KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator+(StaticVector<T, N> lhs, const StaticVector<T, N>& rhs) noexcept
     {
         return lhs += rhs;
     }
 
-    template <Scalar T, std::size_t N>
+    template <ScalarElement T, std::size_t N>
     KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator-(StaticVector<T, N> lhs, const StaticVector<T, N>& rhs) noexcept
     {
         return lhs -= rhs;
     }
 
-    template <Scalar T, std::size_t N>
-    KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator*(StaticVector<T, N> lhs, const T& alpha) noexcept
+    template <ScalarElement T, std::size_t N>
+    KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator*(StaticVector<T, N> lhs, const std::type_identity_t<T>& alpha) noexcept
     {
         return lhs *= alpha;
     }
 
-    template <Scalar T, std::size_t N>
-    KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator*(const T& alpha, StaticVector<T, N> rhs) noexcept
+    template <ScalarElement T, std::size_t N>
+    KOKKOS_INLINE_FUNCTION constexpr StaticVector<T, N> operator*(const std::type_identity_t<T>& alpha, StaticVector<T, N> rhs) noexcept
     {
         return rhs *= alpha;
     }

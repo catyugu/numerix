@@ -7,6 +7,7 @@
 #include <KokkosSparse_CrsMatrix.hpp>
 #include <KokkosSparse_spmv.hpp>
 
+#include <numerix/algebra/kokkos_scalar.hpp>
 #include <numerix/core/concepts.hpp>
 #include <numerix/memory/memory_space.hpp>
 #include <numerix/operator/linear_operator.hpp>
@@ -14,7 +15,7 @@
 namespace numerix {
 
     // A read-only adapter over shared Kokkos CSR storage; no implicit deep copy.
-    template <Scalar T, std::signed_integral Ordinal = int, MemorySpace Mem = DefaultMemorySpace, std::integral Offset = std::size_t>
+    template <ScalarElement T, std::signed_integral Ordinal = int, MemorySpace Mem = DefaultMemorySpace, std::integral Offset = std::size_t>
         requires(!std::same_as<Offset, bool>)
     class SparseOperator {
     public:
@@ -23,13 +24,15 @@ namespace numerix {
         using size_type = std::size_t;
         using matrix_type = KokkosSparse::CrsMatrix<T, Ordinal, Kokkos::Device<typename Mem::execution_space, Mem>, void, Offset>;
 
-        explicit SparseOperator(matrix_type matrix) : matrix_(std::move(matrix)) { }
+        using const_matrix_type = typename matrix_type::const_type;
+
+        explicit SparseOperator(const_matrix_type matrix) : matrix_(std::move(matrix)) { }
 
         size_type Rows() const noexcept { return static_cast<size_type>(matrix_.numRows()); }
         size_type Columns() const noexcept { return static_cast<size_type>(matrix_.numCols()); }
 
         template <class Exec, class X, class Y>
-            requires(AccessibleFrom<Exec, Mem> && ((DenseVector<X, Exec> && MutableDenseVector<Y, Exec>) || (DenseMultiVector<X, Exec> && MutableDenseMultiVector<Y, Exec>))
+            requires(AccessibleFrom<Exec, Mem> && KokkosScalar<T> && ((DenseVector<X, Exec> && MutableDenseVector<Y, Exec>) || (DenseMultiVector<X, Exec> && MutableDenseMultiVector<Y, Exec>))
                 && std::same_as<ScalarOf<X>, T> && std::same_as<ScalarOf<Y>, T>)
         void Apply(const Exec& exec, const X& x, const Y& y) const
         {
@@ -37,7 +40,7 @@ namespace numerix {
         }
 
         template <class Exec, class X, class Y>
-            requires(AccessibleFrom<Exec, Mem> && ((DenseVector<X, Exec> && MutableDenseVector<Y, Exec>) || (DenseMultiVector<X, Exec> && MutableDenseMultiVector<Y, Exec>))
+            requires(AccessibleFrom<Exec, Mem> && KokkosScalar<T> && ((DenseVector<X, Exec> && MutableDenseVector<Y, Exec>) || (DenseMultiVector<X, Exec> && MutableDenseMultiVector<Y, Exec>))
                 && std::same_as<ScalarOf<X>, T> && std::same_as<ScalarOf<Y>, T>)
         void Apply(const Exec& exec, T alpha, const X& x, T beta, const Y& y) const
         {
@@ -45,12 +48,12 @@ namespace numerix {
             KOKKOS_ASSERT(y.extent(0) == Rows());
             KOKKOS_ASSERT(x.extent(1) == y.extent(1));
             // Keep TPL setup and mutable resources out of the core operator's hot path.
-            KokkosSparse::SPMVHandle<Exec, typename matrix_type::const_type, X, Y> handle(KokkosSparse::SPMV_NATIVE);
+            KokkosSparse::SPMVHandle<Exec, const_matrix_type, X, Y> handle(KokkosSparse::SPMV_NATIVE);
             KokkosSparse::spmv(exec, &handle, "N", alpha, matrix_, x, beta, y);
         }
 
     private:
-        typename matrix_type::const_type matrix_;
+        const_matrix_type matrix_;
     };
 
 } // namespace numerix

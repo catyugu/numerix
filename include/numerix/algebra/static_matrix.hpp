@@ -11,7 +11,7 @@ namespace numerix {
 
     // 栈上定长矩阵：行主序存储，values_[i * C + j] 对应 A(i, j)。
     // 与 StaticVector 一样，所有操作都是 KOKKOS_INLINE_FUNCTION。
-    template <Scalar T, std::size_t R, std::size_t C>
+    template <ScalarElement T, std::size_t R, std::size_t C>
     class StaticMatrix {
     public:
         using value_type = T;

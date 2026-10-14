@@ -16,7 +16,7 @@ namespace numerix {
     // 刻意不提供拷贝构造：Kokkos::View 的拷贝是引用计数式的句柄共享，与数学向量的直觉冲突，
     // 隐式共享会让 a = b 的行为难以预测。需要复制时显式写 Clone/DeepCopy，
     // 需要别名或 subview 时直接用 Kokkos::View。
-    template <Scalar T, MemorySpace Mem = DefaultMemorySpace>
+    template <ScalarElement T, MemorySpace Mem = DefaultMemorySpace>
     class Vector {
     public:
         using value_type = T;
@@ -52,7 +52,7 @@ namespace numerix {
     };
 
     // 显式复制：dst = src，在给定的 execution-space instance 上执行。
-    template <class Exec, Scalar T, MemorySpace Mem>
+    template <class Exec, ScalarElement T, MemorySpace Mem>
         requires AccessibleFrom<Exec, Mem>
     void DeepCopy(const Exec& exec, Vector<T, Mem>& dst, const Vector<T, Mem>& src)
     {
@@ -60,7 +60,7 @@ namespace numerix {
     }
 
     // 显式克隆：分配新内存并复制内容，结果与源不共享 allocation。
-    template <class Exec, Scalar T, MemorySpace Mem>
+    template <class Exec, ScalarElement T, MemorySpace Mem>
         requires AccessibleFrom<Exec, Mem>
     Vector<T, Mem> Clone(const Exec& exec, const Vector<T, Mem>& x)
     {

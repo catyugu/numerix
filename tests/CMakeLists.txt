@@ -1,6 +1,7 @@
 add_executable(numerix_tests
     test_main.cpp
     test_core.cpp
+    test_constraints.cpp
     test_vector.cpp
     test_operator.cpp
     test_multivector.cpp

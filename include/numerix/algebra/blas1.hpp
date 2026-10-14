@@ -5,6 +5,7 @@
 #include <KokkosBlas1_nrm2.hpp>
 #include <KokkosBlas1_scal.hpp>
 
+#include <numerix/algebra/kokkos_scalar.hpp>
 #include <numerix/core/concepts.hpp>
 #include <numerix/execution/execution_space.hpp>
 
@@ -19,14 +20,14 @@ namespace numerix {
     // numerix::Vector 通过 View() 交出自己拥有的 View。
 
     template <class Exec, class X>
-        requires(ExecutionSpace<Exec> && MutableDenseVector<X, Exec>)
+        requires(ExecutionSpace<Exec> && MutableDenseVector<X, Exec> && KokkosScalar<ScalarOf<X>>)
     void Scale(const Exec& exec, ScalarOf<X> alpha, const X& x)
     {
         KokkosBlas::scal(exec, x, alpha, x);
     }
 
     template <class X>
-        requires MutableDenseVector<X>
+        requires(MutableDenseVector<X> && KokkosScalar<ScalarOf<X>>)
     void Scale(ScalarOf<X> alpha, const X& x)
     {
         Scale(DefaultExecutionSpace {}, alpha, x);
@@ -35,29 +36,29 @@ namespace numerix {
     // 输出参数同样按 Kokkos 约定用 const 引用传 View：View 是句柄，const 句柄仍然指向可写数据，
     // 可写性由 MutableDenseVector 约束保证。这样 op.Apply(exec, x, y.View()) 这类调用点不必先绑定局部变量。
     template <class Exec, class X, class Y>
-        requires(ExecutionSpace<Exec> && DenseVector<X, Exec> && MutableDenseVector<Y, Exec>)
-    void Axpy(const Exec& exec, ScalarOf<Y> alpha, const X& x, const Y& y)
+        requires(ExecutionSpace<Exec> && DenseVector<X, Exec> && MutableDenseVector<Y, Exec> && AxpyCompatibleScalars<ScalarOf<X>, ScalarOf<Y>>)
+    void Axpy(const Exec& exec, ScalarOf<X> alpha, const X& x, const Y& y)
     {
         KokkosBlas::axpy(exec, alpha, x, y);
     }
 
     template <class X, class Y>
-        requires(DenseVector<X> && MutableDenseVector<Y>)
-    void Axpy(ScalarOf<Y> alpha, const X& x, const Y& y)
+        requires(DenseVector<X> && MutableDenseVector<Y> && AxpyCompatibleScalars<ScalarOf<X>, ScalarOf<Y>>)
+    void Axpy(ScalarOf<X> alpha, const X& x, const Y& y)
     {
         Axpy(DefaultExecutionSpace {}, alpha, x, y);
     }
 
     // 内积按 Kokkos Kernels 的 BLAS 语义：Dot(x, y) = sum(conj(x(i)) * y(i))。
     template <class Exec, class X, class Y>
-        requires(ExecutionSpace<Exec> && DenseVector<X, Exec> && DenseVector<Y, Exec> && std::same_as<ScalarOf<X>, ScalarOf<Y>>)
+        requires(ExecutionSpace<Exec> && DenseVector<X, Exec> && DenseVector<Y, Exec> && std::same_as<ScalarOf<X>, ScalarOf<Y>> && KokkosScalar<ScalarOf<X>>)
     auto Dot(const Exec& exec, const X& x, const Y& y)
     {
         return KokkosBlas::dot(exec, x, y);
     }
 
     template <class X, class Y>
-        requires(DenseVector<X> && DenseVector<Y> && std::same_as<ScalarOf<X>, ScalarOf<Y>>)
+        requires(DenseVector<X> && DenseVector<Y> && std::same_as<ScalarOf<X>, ScalarOf<Y>> && KokkosScalar<ScalarOf<X>>)
     auto Dot(const X& x, const Y& y)
     {
         return Dot(DefaultExecutionSpace {}, x, y);
@@ -65,15 +66,17 @@ namespace numerix {
 
     // 2-范数：返回实标量，复数向量也不例外。
     template <class Exec, class X>
-        requires(ExecutionSpace<Exec> && DenseVector<X, Exec>)
-    auto Norm2(const Exec& exec, const X& x)
+        requires(ExecutionSpace<Exec> && DenseVector<X, Exec> && KokkosScalar<ScalarOf<X>>
+            && std::convertible_to<typename KokkosKernels::ArithTraits<ScalarOf<X>>::mag_type, RealOfT<ScalarOf<X>>>)
+    RealOfT<ScalarOf<X>> Norm2(const Exec& exec, const X& x)
     {
         return KokkosBlas::nrm2(exec, x);
     }
 
     template <class X>
-        requires DenseVector<X>
-    auto Norm2(const X& x)
+        requires(DenseVector<X> && KokkosScalar<ScalarOf<X>>
+            && std::convertible_to<typename KokkosKernels::ArithTraits<ScalarOf<X>>::mag_type, RealOfT<ScalarOf<X>>>)
+    RealOfT<ScalarOf<X>> Norm2(const X& x)
     {
         return Norm2(DefaultExecutionSpace {}, x);
     }
@@ -81,7 +84,7 @@ namespace numerix {
     // Pairwise column inner products, not the full Gram matrix. Output stays on the given stream.
     template <class Exec, class X, class Y, class R>
         requires(ExecutionSpace<Exec> && DenseMultiVector<X, Exec> && DenseMultiVector<Y, Exec> && MutableDenseVector<R, Exec>
-            && Scalar<ScalarOf<X>> && std::same_as<ScalarOf<X>, ScalarOf<Y>> && std::same_as<ScalarOf<X>, ScalarOf<R>>)
+            && KokkosScalar<ScalarOf<X>> && std::same_as<ScalarOf<X>, ScalarOf<Y>> && std::same_as<ScalarOf<X>, ScalarOf<R>>)
     void ColumnDots(const Exec& exec, const X& x, const Y& y, const R& result)
     {
         KOKKOS_ASSERT(x.extent(0) == y.extent(0));
