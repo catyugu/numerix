@@ -75,12 +75,31 @@ cmake --build build-release --parallel 2
 ctest --test-dir build-release --output-on-failure
 ```
 
-下一步：阶段 2 先按 TDD 实现带显式执行流的 CG、Identity 预条件子与收敛结果；
-先验证已知谱 SPD 系统和复数 Hermitian 正定系统，再扩展其他迭代法。
+下一步：阶段 2 首先按 TDD 将求解器代数契约与 CG 一起落地（见 DESIGN.md §5.9），
+再扩展预条件子和其他迭代法。现有 View 运算保留本地语义；本次只确定文档约定，
+没有新增求解器、代数操作对象或 MPI 实现。
 
 ## 阶段 2：线性求解器
 
-- 接口：`SolveResult Solve(exec, const A&, const X& b, X& x)`
+### 第一步：代数操作接口与 CG 同时落地
+
+1. 先写失败测试：已知谱实数 SPD、复数 Hermitian 正定系统，以及能区分本地归约和完整向量结果的
+   受控分区测试代数实现。验证 CG 的实际步长、真实残差与退出状态，不能只检查接口调用次数。
+2. 实现受 concept 约束、静态绑定的最小代数操作接口及本地实现；调用方显式绑定 exec。
+   工作向量创建、复制、更新、内积、范数与向量兼容性经该接口完成。接口只收录 CG 的真实需要，
+   与 CG 一起交付，不提前添加通用向量空间框架或 MPI 空壳。
+3. 实现 `SolveResult Solve(algebra, const A& op, const X& b, X& x)` 的入口语义、CG、Identity 预条件子
+   与收敛结果。这里是接口草案，完整 C++ 签名和算法配置在实施时由测试确定。
+   求解器不得写死 Vector / View 存储，不得绕过代数对象直接调用本地 Dot / Norm2 或自行调用 MPI。
+4. 在测试保持通过的前提下重构，验证显式执行流、工作空间所有权、归约语义和收敛判断。
+   本地与受控分区代数实现通过同一 CG 算法；实际 MPI 正确性仍由阶段 4 多进程测试确认。
+
+本地代数内部复用现有 View 内核；算子 Apply 保留显式 exec，并与代数对象绑定的执行流一致。
+分布式 owned / ghost、全局归约、空间兼容性和操作完成契约以 DESIGN.md §5.9 为准。
+进入其他迭代法前必须先完成上述步骤。
+
+### 后续交付
+
 - 迭代法：CG、MINRES、GMRES、FGMRES、BiCGStab
 - 预条件子：Identity、Jacobi、BlockJacobi、ILU(0)
 - 收敛准则：相对残差、绝对残差与最大迭代次数，`ConvergenceMonitor` 记录残差历史
@@ -103,9 +122,13 @@ ctest --test-dir build-release --output-on-failure
 
 - `Communicator`、`DistributedVector`、`Partition`、`HaloExchange`（MPI 可选）
 - 后端 adapter：eigen / blas / lapack / hdf5 / mpi / petsc / ginkgo
-- 可选依赖不得进入核心头文件
+- 实现阶段 2 已确定的代数契约：全局内积与范数、按分布创建工作向量、owned / ghost 语义和分布兼容性
+- 分布式算子组合本地 SparseOperator / matrix-free 算子与通信计划，明确 domain/range 分布
+- 区分 halo 刷新与反向贡献累加，明确通信请求、缓冲区生命周期及 Kokkos 执行流同步
+- 可选依赖不得进入核心头文件；通用求解器不依赖具体 MPI 类型
 
-验收：单进程与多进程结果一致；adapter 关闭时核心库仍可独立构建。
+验收：不均匀分区与空 owned 分区、ghost 不重复计数、分布不兼容拒绝、halo 刷新与反向累加；
+单进程与多进程结果一致，所有进程的收敛状态和退出一致；adapter 关闭时核心库仍可独立构建。
 
 ## 阶段 5：诊断与性能
 

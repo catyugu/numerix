@@ -27,7 +27,8 @@ numerix 只在其上提供科学计算语义，不与 Eigen/PETSc 等特定数�
 ### 性能与抽象
 
 - 零开销：热路径中不出现虚调用、`std::function`、堆分配与运行时分派。
-- 执行流显式：算法接口接收 execution-space instance，不隐式使用某个默认流；运行期多态只允许用于
+- 执行流显式：底层算法接口接收 execution-space instance；求解器可通过调用方显式构造的代数操作对象
+  绑定该 instance，不隐式使用某个默认流。运行期多态只允许用于
   求解器选择、后端适配与用户扩展，且不得进入 kernel、装配循环与向量运算。
 - 设备可移植：标量只用 `Kokkos::complex` 与浮点，进入 kernel 的函数必须 `KOKKOS_INLINE_FUNCTION`，
   定长代数与标量运算能用 `constexpr` 的一律 `constexpr`。
@@ -40,6 +41,10 @@ numerix 只在其上提供科学计算语义，不与 Eigen/PETSc 等特定数�
 - `Vector` 是 owning、move-only 存储，不含数学成员函数；需要复制时显式 `Clone` / `DeepCopy`，
   需要别名或 subview 时直接用 `Kokkos::View`。
 - `const` 容器只交出只读 View；只读与可写由类型区分，不靠约定。
+- 现有 Vector / MultiVector、View BLAS 和 SparseOperator 具有本地语义，不隐含全局归约或 ghost 处理。
+- 阶段 2 首先随 CG 实现静态绑定的代数操作接口：求解器通过它创建工作向量、执行向量更新、内积、范数
+  和兼容性检查，不写死本地 View / Vector，不自行调用 MPI。分布式数学与完成契约见 DESIGN.md §5.9，
+  MPI 实现留到阶段 4；现在不添加无人使用的代数对象或分布式空壳。
 
 ### 错误与日志
 

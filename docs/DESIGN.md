@@ -3,7 +3,8 @@
 > C++20 + Kokkos-native 的通用科学计算基础库。numerix 不提供 FEM/FVM/BEM 框架，
 > 而提供所有离散方法共享的数值执行模型。
 
-状态：阶段 1 动态代数已落地（v0.1，含 Kokkos-native 纠偏）。本文件是唯一的设计记录；
+状态：阶段 1 动态代数已落地（v0.1，含 Kokkos-native 纠偏）；阶段 2 的求解器代数契约已确定，尚未实现。
+本文件是唯一的设计记录；
 与代码不一致时以本文件为准并同步修正代码。
 
 ## 1. 设计目标
@@ -11,7 +12,7 @@
 1. 仅 C++20。不使用 `std::mdspan`、`std::expected`、modules，因为科学计算环境升级慢。
 2. Kokkos-native 可移植性：Serial / OpenMP / CUDA / HIP / SYCL 由 `Kokkos::ExecutionSpace`、
    `Kokkos::MemorySpace`、`Kokkos::View` 提供，numerix 不重新设计执行抽象。
-3. 零开销抽象：`Apply(exec, x, y)` 的最终形态是 Kokkos kernel + SIMD/GPU kernel，
+3. 零开销抽象：本地 `Apply(exec, x, y)` 的最终形态是 Kokkos kernel + SIMD/GPU kernel，
    热路径中不出现虚调用、`std::function`、堆分配与运行时分派。
 4. 强编译期安全：公共模板 API 全部由 concept 约束；非法空间组合在模板实例化阶段就被拒绝。
 5. 同一份源码在主机与设备上语义一致：标量、定长代数与所有 kernel 内可调用的函数都必须是
@@ -19,11 +20,20 @@
 
 ## 2. 核心哲学
 
-依赖链只有单向的一条：
+依赖保持单向。下图箭头表示上层使用下层，求解器与分布式实现为后续工作：
 
-```text
-Execution -> Memory -> View -> Vector -> Operator -> Solver
+```mermaid
+flowchart TD
+    S["求解器"] --> A["代数操作契约与算子契约"]
+    L["本地代数与本地算子"] --> A
+    D["分布式代数与分布式算子"] --> A
+    D --> L
+    D --> M["可选 MPI adapter"]
+    L --> K["Kokkos Core 与 Kokkos Kernels"]
 ```
+
+本地容器与 View 内核不依赖分布式层。求解器通过静态绑定的代数操作与算子接口表达计算，
+不直接依赖 MPI、某个 CSR 实现或某个 owning 容器。分布式语义现在确定，MPI 实现留到阶段 4。
 
 FEM/FVM/FDM/FDTD/BEM 的共同部分不是 mesh，而是数据搬运、线性代数、算子、求解器与执行模型。
 因此 numerix 不出现 `Mesh -> Field -> PDE -> Solver` 这条链。
@@ -120,10 +130,14 @@ concept MutableDenseVector = DenseVector<V, Exec> && !std::is_const_v<typename V
 - 契约围绕 `rank` / `value_type` / `extent` / `memory_space` / 可访问性 / 可写性建立，
   **不围绕裸指针**：设备端 `Data()` 在主机上不可解引用，subview、跨步视图与分布式向量也不该用指针表达。
 - 非法的空间组合（设备内存 + 主机执行流）在模板实例化阶段被拒绝，而不是运行时出错。
+- `DenseVector` / `DenseMultiVector` 描述可访问的本地 View，不描述全局所有权或分布兼容性；
+  相同 extent 不足以证明两个分布式向量属于同一向量空间。
 
 ### 5.3 View 不再封装，Vector 只负责所有权
 
 不定义 `numerix::View`。`Kokkos::View` 是底层基础，直接使用。
+`Vector`、`MultiVector` 与它们交出的 View 均为本地存储，不隐含 communicator、全局编号或 ghost 所有权。
+以后分布式对象组合这些存储与分布信息，不改变现有容器的本地职责。
 
 `numerix::Vector` 是 **owning、move-only 的存储**，没有数学成员函数：
 
@@ -171,6 +185,7 @@ public:
 输出与输入不得重叠。零行的内积为零，零列返回空结果。
 标量类型必须一致，复数第一参数共轭，遵循向量已有的 Euclidean 内积约定。
 操作使用显式 execution-space instance；输出返回主机前需由调用方 fence。
+`ColumnDots` 只归约输入 View 中的本地行，不执行跨进程归约，也不识别或排除 ghost。
 
 ### 5.4 BLAS-1：numerix 定接口，Kokkos Kernels 出内核
 
@@ -189,6 +204,8 @@ Dot(exec, x, y);            Norm2(exec, x);
   可写性由 `MutableDenseVector` 约束保证。
 - 内积语义与 Kokkos Kernels 的 BLAS 一致：`Dot(x, y) = sum(conj(x(i)) * y(i))`；
   `Norm2` 对复数向量也返回实标量。
+- 这些自由函数是本地内核：`Dot`、`Norm2` 只计算所传 View 的数据；`Scale`、`Axpy` 也只更新所传 View。
+  它们不执行通信，不判断全局所有权，也不自动排除 ghost。求解器所需的完整向量运算由代数操作接口提供（§5.9）。
 
 ### 5.5 算子契约：编译期 + 显式执行流
 
@@ -201,6 +218,14 @@ concept LinearOperatorFor = ExecutionSpace<Exec> &&
 ```
 
 `Apply` 只做 `y = A x`（不做 `y += A x`、不返回结果），在给定的 execution-space instance 上执行。
+`LinearOperatorFor` 仅检查调用形式；满足它不等于已验证线性性、向量空间兼容性或通信完成性。
+它不禁止算子内部通信，也不强制现有本地算子提供 domain/range 分布查询。
+
+本地 Apply 可以只将计算提交到 exec；同一 instance 上的后续操作必须能够依序消费结果，
+主机或另一执行流读取前由调用方同步。未来分布式 Apply 的基础同步接口必须在返回前完成
+本次必要的数据通信，并将输出计算提交到约定的 exec，保证后续代数操作可以安全使用输出。
+若以后提供异步通信接口，必须显式返回或持有完成请求，定义等待、缓冲区生命周期与执行流同步；
+不得仅凭 Apply 已返回推断任意异步操作全部完成。
 
 融合形式是**可选**能力，单独用概念表达：
 
@@ -236,14 +261,16 @@ concept ScaledLinearOperatorFor = LinearOperatorFor<Op, Exec, X, Y> &&
 rank-1 与 rank-2 输入输出必须对应；rank-2 的列数相同，矩形矩阵要求
 输入行数等于 Columns，输出行数等于 Rows。类型约束拒绝不可访问内存、只读输出、
 不同标量和不同 rank；尺寸是运行期契约。
+当前 `SparseOperator` 是本地 CSR 适配器，不更新 ghost，也不实施分布式矩阵乘法。
+未来分布式算子组合通信计划与本地算子来实现完整 Apply。
 
 ### 5.6 索引类型：区分 size / local ordinal / global ordinal
 
 | 名字 | 语义 | 当前形态 |
 | --- | --- | --- |
 | `size_type` | 元素个数、extent | `std::size_t` / `View::size_type` |
-| local ordinal | 单个内存空间内的下标 | `View::index_type`（Kokkos 默认 64 位） |
-| global ordinal | 分布式/稀疏全局编号 | 阶段 1 稀疏层引入（KokkosSparse 用 `Ordinal`） |
+| local ordinal | 单个内存空间内的下标 | `View::index_type` 或本地 CSR 的 `Ordinal`，按各自接口选择 |
+| global ordinal | 跨进程的全局自由度编号 | 阶段 4 的分布描述引入；与本地 CSR `Ordinal` 独立 |
 
 - 不创造万能 `Index`。
 - `KOKKOS_LAMBDA(int i)` + `static_cast<int>(size)` 不是 numerix 的写法：
@@ -276,6 +303,44 @@ NUMERIX_LOG_DEBUG(logger, "iteration residual");
 `NUMERIX_LOG_DEBUG` 在 Release 构建中整体消除（未启用时仍以不求值的 `sizeof` 标记参数已使用，
 避免 `-Werror` / `/WX` 下的未使用变量告警）。
 
+### 5.9 求解器代数契约与分布式边界（阶段 2 首先实现）
+
+求解器入口采用 `Solve(algebra, A, b, x)` 的形式，返回 `SolveResult`；这是待实现的接口约定。
+`algebra` 是受 concept 约束、静态绑定的操作对象，由调用方显式构造并绑定 execution-space instance，
+不隐式选择默认流。收敛容限、迭代上限等算法配置归 solver，不能混入代数对象的职责。
+
+CG 的最小本地代数实现必须随 CG 一起落地，并被算法实际使用；现在不添加无人使用的类、
+通用向量空间框架或 MPI 空壳。操作名称与完整 C++ 签名由首次实现和测试确定，但以下职责必须具备：
+
+| 职责 | 本地实现 | 后续分布式实现 |
+| --- | --- | --- |
+| 工作向量创建与显式复制 | 根据输入形状、标量与内存空间创建独立存储 | 同时保留输入分布、所有权与所需 ghost 布局 |
+| 向量更新 | 调用现有 Scale / Axpy / DeepCopy 等内核 | 按所有权更新数据，明确 ghost 的有效性；按算法需要提供通信 |
+| 内积、范数与收敛尺度 | 使用本地 Euclidean 内积和范数 | 对 owned 分量进行全局归约，排除重复 ghost；所有进程得到一致的判定 |
+| 向量兼容性 | 验证形状、标量、内存可访问性等前提 | 同时验证 communicator、全局编号、所有权与分布兼容性 |
+| 执行与完成条件 | 在显式绑定的 exec 上调用本地操作 | 协调 exec 与通信完成，保证缓冲区和后续操作安全 |
+
+求解器的工作向量通过代数接口创建，不能硬编码为 `Vector<T>` 或某种 View。
+迭代与收敛判断中的向量复制、更新、内积和范数均经该接口完成；求解器不得直接调用
+`Dot(exec, x.View(), y.View())` 等本地内核来替代完整向量运算，也不得自行添加 MPI_Allreduce。
+本地代数实现内部可以直接使用 View。算子 Apply 仍通过算子契约调用，并与代数对象使用的执行流保持一致；
+必要的融合回退工作空间由求解器在迭代开始前创建，不把可变工作空间塞进算子。
+
+所有实现保留同一复数约定：内积共轭第一个参数。分布式内积是各进程 owned 分量内积之和，
+即 `sum_p sum_{i in owned(p)} conj(x_i) * y_i`；全局 2-范数由该内积得到。
+空 owned 分区仍参与所需 collective，贡献零。参与进程必须按一致顺序调用 collective，
+不能根据本地残差提前退出迭代；收敛状态与退出决定必须在参与进程间一致。
+同步内积返回的标量应已经可供算法使用；未来异步归约需要单独明确完成契约。
+
+分布描述负责全局编号到本地编号的映射、owned / ghost 区分与分布兼容性。
+分布式算子负责 domain/range 分布及所需的数据交换；仅本地长度或全局长度相等不能证明输入输出兼容。
+CG 要求 A 在同一向量空间上自伴且正定；其方阵尺寸不足以代替该前提。
+不能由接口验证的数学或分布前提必须列为调用契约，不能声称已由 concept 自动保证。
+
+MPI 及其数据类型只出现在可选 adapter / distributed 实现中，不进入本地容器、核心 concepts、
+本地 BLAS 或通用求解器头文件。halo 接口区分拥有者向 ghost 的数据刷新与 ghost 贡献向拥有者的累加；
+开始、完成、数据有效性与设备内存同步由阶段 4 的实现明确，并以真实多进程测试验收。
+
 ## 6. 模板规则
 
 1. 所有公共模板 API 必须由 concept 约束，禁止 `template <class T> void Solve(T);` 这类无约束接口。
@@ -306,6 +371,11 @@ NUMERIX_LOG_DEBUG(logger, "iteration residual");
 - 融合算子语义：`Apply(exec, alpha, x, beta, y)` 与 `alpha (A x) + beta y` 一致
 - 所有权与 const 语义：`Vector` 不可拷贝、移动转移所有权、`const Vector` 只给 `const` View
 - 定长代数在编译期求值（实数与复数都覆盖）
+- 求解器代数接口（阶段 2 首步）：用本地实现和受控的分区测试代数实现验证工作向量创建、
+  完整内积、范数与收敛判断；样例必须能区分仅本地归约与完整向量结果，不能仅凭调用计数验收。
+  该测试不冒充 MPI 正确性验证。
+- 分布式实现（阶段 4）：不均匀分区、空 owned 分区、ghost 不重复计数、分布不兼容、
+  halo 刷新与反向累加，以及各进程退出状态与单进程参考一致。
 - Jacobian 一致性（后续）：`J v ≈ (F(x + eps v) - F(x)) / eps`
 
 数值测试容差集中管理，不用硬编码的魔数散落各处。
@@ -357,15 +427,13 @@ NUMERIX_LOG_DEBUG(logger, "iteration residual");
   `find_dependency(KokkosKernels)` 获得。版本头文件统一为 `<numerix/config.h>`，0.x 使用 SameMinorVersion。
   当前 numerix 保持静态库，构建树与安装包都提供 `numerix::numerix`。
 
+- D-18 分布式语义前置（2026-10-14）：本地容器与 View 内核保持本地职责；分布式数学语义现在确定，
+  MPI 实现留到阶段 4。阶段 2 首先随 CG 引入静态绑定的代数操作接口，求解器不写死本地 View、
+  owning 容器或本地归约。执行空间由调用方显式绑定，所有权、全局归约、分布兼容性与完成条件见 §5.9。
+
 ## 11. 最终架构
 
-```text
-FEM / FVM / FDM / FDTD / BEM
-              |
-           numerix
-   Operator -> Linear Algebra -> Kokkos Runtime
-              |
-     CPU / CUDA / HIP / SYCL
-              |
-External: PETSc / Ginkgo / Eigen / HDF5 / MPI
-```
+上层 FEM / FVM / FDM / FDTD / BEM 使用 numerix 的算子、代数与求解器契约。
+本地实现经 Kokkos 执行 CPU / CUDA / HIP / SYCL 计算；分布式实现组合本地内核、分布信息与通信计划。
+MPI、PETSc、Ginkgo、Eigen、HDF5 等通过可选 adapter 接入，通用求解器不依赖这些具体实现。
+依赖方向见 §2，MPI 实现不能使本地核心反向依赖分布式层。
