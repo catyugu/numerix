@@ -45,10 +45,14 @@ def main():
     configure(ROOT / "ci/consumer", work / "consumer", f"-DCMAKE_PREFIX_PATH={prefix}")
     check(work / "consumer")
 
+    # CMake 4.4 renamed the author-warning category; older CMake uses "dev".
+    version = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
+    author_flag = "-Werror=author" if tuple(map(int, version.split(".")[:2])) >= (4, 4) else "-Werror=dev"
+
     # Reuse the installed dependencies: also exercises NUMERIX_USE_SYSTEM_KOKKOS.
     configure(ROOT / "ci/superproject", work / "superproject",
               f"-DCMAKE_PREFIX_PATH={prefix}", "-DNUMERIX_USE_SYSTEM_KOKKOS=ON",
-              "-Werror=dev")
+              author_flag)
     check(work / "superproject")
 
 
