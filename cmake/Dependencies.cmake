@@ -34,17 +34,27 @@ if(NUMERIX_USE_SYSTEM_KOKKOS)
     find_package(Kokkos REQUIRED)
     find_package(KokkosKernels REQUIRED)
 else()
+    # Keep MSVC C4702 enabled in numerix: Kokkos 5.2.2 has non-exclusive
+    # constexpr branches in has_all_zero_bits, which MSVC diagnoses even
+    # through SYSTEM headers. The patch only makes those branches exclusive.
+    set(_NUMERIX_KOKKOS_PATCH_ARGS)
+    if(NUMERIX_KOKKOS_VERSION STREQUAL "5.2.2")
+        set(_NUMERIX_KOKKOS_PATCH_ARGS PATCHES
+            "${CMAKE_CURRENT_LIST_DIR}/patches/kokkos-5.2.2-unreachable.patch")
+    endif()
     CPMAddPackage(
         NAME Kokkos
         SYSTEM YES
         GITHUB_REPOSITORY kokkos/kokkos
         GIT_TAG ${NUMERIX_KOKKOS_VERSION}
+        ${_NUMERIX_KOKKOS_PATCH_ARGS}
         OPTIONS
         "Kokkos_ENABLE_SERIAL ON"
         "Kokkos_ENABLE_TESTS OFF"
         "Kokkos_ENABLE_EXAMPLES OFF"
         "Kokkos_ENABLE_BENCHMARKS OFF"
     )
+    unset(_NUMERIX_KOKKOS_PATCH_ARGS)
     CPMAddPackage(
         NAME KokkosKernels
         SYSTEM YES

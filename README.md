@@ -11,6 +11,7 @@ numerix 不提供 FEM/FVM/BEM 框架，而提供所有离散方法共享的数�
 - CMake >= 3.26
 - 支持 C++20 的编译器（GCC / Clang / MSVC）
 - 推荐生成器：Ninja
+- 默认拉取依赖时需要 Git 和 patch（Git for Windows 已包含 patch）
 
 Windows 上必须使用 MSVC 驱动（clang-cl 或 cl.exe）：KokkosKernels 5.2.2 对 clang++（GNU 驱动）
 会注入 MSVC 语法开关 `/EHsc`，clang++ 把它当成输入文件。配置阶段会直接给出该提示，不会等到编译。
@@ -23,7 +24,9 @@ cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug \
 ```
 
 必需依赖是 Kokkos Core 与 Kokkos Kernels（同 tag，版本固定在 `cmake/Dependencies.cmake`），
-默认由 CPM 拉取。
+默认由 CPM 拉取。固定的 Kokkos 5.2.2 会应用 `cmake/patches/` 中的局部补丁，
+将 `has_all_zero_bits` 的常量分支改为互斥分支，避免 MSVC 的 C4702 告警，保持 `/W4 /WX`。
+使用系统 Kokkos 时，需由系统包提供这一修正。
 
 ## 快速开始
 
