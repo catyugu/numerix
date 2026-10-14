@@ -1,0 +1,10 @@
+--- a/sparse/src/KokkosSparse_spmv_handle.hpp
++++ b/sparse/src/KokkosSparse_spmv_handle.hpp
+@@ -55,7 +55,6 @@
+     case SPMV_BSR_TC: return "SPMV_BSR_TC";
+   }
+   throw std::invalid_argument("SPMVHandle::get_algorithm_name: unknown algorithm");
+-  return "<Unknown>";
+ }
+ 
+ /// Return true if the given algorithm is always a native (KokkosKernels)

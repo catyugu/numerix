@@ -60,6 +60,9 @@ TDD 记录（最终新增 13 项测试）：先添加数学性质与数据契约
 保留失败测试，以空列直接返回、空行 deep_copy 零值修复。
 随后新增原生 `int` offset 测试，确认 unsigned-only 约束编译失败，再放宽为非 bool 整数。
 全部通过后，将稀疏 Apply 重构为显式 `SPMV_NATIVE` 的栈上 handle，重跑全套验证。
+跨平台 CI 又发现 Kokkos Kernels 5.2.2 的 SpMV handle 在 `throw` 后保留了不可达 return，
+导致 MSVC Debug 的 C4702 被 `/WX` 拒绝。对固定版本添加仅删除该语句的依赖补丁，
+保持警告报错策略，复验 Debug / Release。
 
 复现：
 

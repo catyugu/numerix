@@ -25,7 +25,8 @@ cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug \
 
 必需依赖是 Kokkos Core 与 Kokkos Kernels（同 tag，版本固定在 `cmake/Dependencies.cmake`），
 默认由 CPM 拉取。固定的 Kokkos 5.2.2 会应用 `cmake/patches/` 中的局部补丁，
-将 `has_all_zero_bits` 的常量分支改为互斥分支，避免 MSVC 的 C4702 告警，保持 `/W4 /WX`。
+将 Kokkos 的 `has_all_zero_bits` 常量分支改为互斥分支，并删除 Kokkos Kernels
+的 SpMV handle 中 `throw` 后的不可达 `return`，避免 MSVC 的 C4702 告警，保持 `/W4 /WX`。
 使用系统 Kokkos 时，需由系统包提供这一修正。
 
 ## 快速开始

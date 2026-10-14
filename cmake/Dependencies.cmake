@@ -55,16 +55,24 @@ else()
         "Kokkos_ENABLE_BENCHMARKS OFF"
     )
     unset(_NUMERIX_KOKKOS_PATCH_ARGS)
+    # Its SpMV handle has a return after an unconditional throw (MSVC C4702).
+    set(_NUMERIX_KOKKOSKERNELS_PATCH_ARGS)
+    if(NUMERIX_KOKKOS_VERSION STREQUAL "5.2.2")
+        set(_NUMERIX_KOKKOSKERNELS_PATCH_ARGS PATCHES
+            "${CMAKE_CURRENT_LIST_DIR}/patches/kokkoskernels-5.2.2-unreachable.patch")
+    endif()
     CPMAddPackage(
         NAME KokkosKernels
         SYSTEM YES
         GITHUB_REPOSITORY kokkos/kokkos-kernels
         GIT_TAG ${NUMERIX_KOKKOS_VERSION}
+        ${_NUMERIX_KOKKOSKERNELS_PATCH_ARGS}
         OPTIONS
         "KokkosKernels_ENABLE_TESTS OFF"
         "KokkosKernels_ENABLE_EXAMPLES OFF"
         "KokkosKernels_ENABLE_BENCHMARKS OFF"
     )
+    unset(_NUMERIX_KOKKOSKERNELS_PATCH_ARGS)
     # KokkosKernels enables /bigobj for CUDA, but its CPU ETI sources also
     # exceed MSVC's COFF section limit in Debug builds (C1128).
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
