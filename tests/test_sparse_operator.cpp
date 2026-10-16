@@ -2,6 +2,7 @@
 
 #include <initializer_list>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 
 #include <numerix/algebra/multivector.hpp>
@@ -49,6 +50,29 @@ namespace numerix {
         static_assert(!LinearOperatorFor<SparseOperator<double>, DefaultExecutionSpace, View, Vector<double>::const_view_type>);
         static_assert(!LinearOperatorFor<SparseOperator<double>, DefaultExecutionSpace, View, Vector<Complex>::view_type>);
         static_assert(std::is_same_v<SparseOperator<double, long long, DefaultMemorySpace, std::size_t>::matrix_type::ordinal_type, long long>);
+
+        TEST(SparseOperatorTest, InvalidVectorExtentsUseBackendDiagnostics)
+        {
+            const auto exec = Exec();
+            const SparseOperator<double> op(MakeMatrix<double>({2.0, -1.0, 3.0, 4.0}));
+            Vector<double> x(4), y(3), short_x(3), short_y(2), long_x(5), long_y(4);
+            EXPECT_THROW(op.Apply(exec, short_x.View(), y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, x.View(), short_y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, long_x.View(), y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, x.View(), long_y.View()), std::runtime_error);
+        }
+
+        TEST(SparseOperatorTest, InvalidMultiVectorExtentsUseBackendDiagnostics)
+        {
+            const auto exec = Exec();
+            const SparseOperator<double> op(MakeMatrix<double>({2.0, -1.0, 3.0, 4.0}));
+            MultiVector<double> x(4, 2), y(3, 2), short_x(3, 2), short_y(2, 2), long_x(5, 2), long_y(4, 2), extra_column(3, 3);
+            EXPECT_THROW(op.Apply(exec, short_x.View(), y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, x.View(), short_y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, long_x.View(), y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, x.View(), long_y.View()), std::runtime_error);
+            EXPECT_THROW(op.Apply(exec, x.View(), extra_column.View()), std::runtime_error);
+        }
 
         TEST(SparseOperatorTest, NativeSignedOffsetsAreSupportedWithoutConversion)
         {

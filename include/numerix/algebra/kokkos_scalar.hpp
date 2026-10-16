@@ -1,5 +1,7 @@
 #pragma once
 
+#include <concepts>
+
 #include <KokkosKernels_ArithTraits.hpp>
 
 #include <numerix/core/scalar.hpp>
@@ -10,23 +12,8 @@ namespace numerix {
     template <class T>
     concept KokkosScalar = ScalarElement<T> && KokkosKernels::ArithTraits<T>::is_specialized;
 
-    // Native axpby instantiates both simplified coefficient cases and the general expression.
+    // Conversion is the interface policy; kernel arithmetic is checked by Kokkos Kernels.
     template <class X, class Y>
-    concept AxpyCompatibleScalars = KokkosScalar<X> && KokkosScalar<Y> && requires(Y y, const X& x, const X& alpha, const Y& beta) {
-        { y = -y };
-        { y = beta * y };
-        { y = x };
-        { y = -x };
-        { y = x + y };
-        { y = x - y };
-        { y = x + beta * y };
-        { y = -x + y };
-        { y = -x - y };
-        { y = -x + beta * y };
-        { y = alpha * x };
-        { y = alpha * x + y };
-        { y = alpha * x - y };
-        { y = alpha * x + beta * y };
-    };
+    concept AxpyCompatibleScalars = KokkosScalar<X> && KokkosScalar<Y> && std::convertible_to<X, Y>;
 
 } // namespace numerix

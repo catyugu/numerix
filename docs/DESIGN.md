@@ -206,7 +206,8 @@ Dot(exec, x, y);            Norm2(exec, x);
   整数 View、只有 numerix traits 的类型，以及当前 Kokkos Kernels 未支持的 complex<long double>
   不得通过动态数值运算的调用约束；存储能力与数值内核能力分开判断。
 - Axpy 的系数类型是输入标量类型，与 Kokkos axpby 的系数转换规则一致。
-  `AxpyCompatibleScalars` 检查简化系数分支和通用表达式所需的赋值、取负与乘加兼容性。
+  `AxpyCompatibleScalars` 只要求两种标量满足 KokkosScalar，且输入标量可隐式转换为输出标量。
+  可隐式转换不保证无精度损失，也不保证底层内核可实例化；具体算术与后端实现检查交给 Kokkos Kernels。
   支持可执行的混合类型，例如 float 输入、double 输出，或 double 输入、complex<double> 输出和实数系数；
   不接受 complex 输入写入实数输出，也不接受实数输入配复数系数。
   系数及输入乘法遵循输入标量精度，不承诺按输出精度完成整个表达式。
@@ -281,6 +282,7 @@ concept ScaledLinearOperatorFor = LinearOperatorFor<Op, Exec, X, Y> &&
 rank-1 与 rank-2 输入输出必须对应；rank-2 的列数相同，矩形矩阵要求
 输入行数等于 Columns，输出行数等于 Rows。类型约束拒绝不可访问内存、只读输出、
 不同标量和不同 rank；尺寸是运行期契约。
+输入输出行数及多向量列数的检查由 Kokkos Kernels 的带 handle 的 spmv 入口完整实施，本层不重复检查。
 当前 `SparseOperator` 是本地 CSR 适配器，不更新 ghost，也不实施分布式矩阵乘法。
 未来分布式算子组合通信计划与本地算子来实现完整 Apply。
 
@@ -369,6 +371,8 @@ MPI 及其数据类型只出现在可选 adapter / distributed 实现中，不�
    当前 numerix 没有任何类型擦除包装；引入时必须同时说明它不在热路径上。
 4. 组合优于继承；模块之间依赖接口与共同数据结构，不依赖彼此的具体实现。
 5. 任何进入 kernel 的 numerix 函数必须是 `KOKKOS_INLINE_FUNCTION`（能 constexpr 的一律 constexpr）。
+6. 公共 concept 只表达 numerix 承诺的语义与稳定类型约束，不复刻第三方模板内部的算术表达式、
+   分支或可实例化性检查。第三方已完整实施的参数验证不重复检查，除非 numerix 承诺更严格的契约。
 
 定长向量的乘法系数使用无重复推导的目标标量类型，允许可隐式转换的系数，例如
 `2 * StaticVector<double>` 和 `2.0 * StaticVector<complex<double>>`；结果保持向量元素类型。

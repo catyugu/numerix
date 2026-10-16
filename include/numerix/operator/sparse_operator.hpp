@@ -44,9 +44,6 @@ namespace numerix {
                 && std::same_as<ScalarOf<X>, T> && std::same_as<ScalarOf<Y>, T>)
         void Apply(const Exec& exec, T alpha, const X& x, T beta, const Y& y) const
         {
-            KOKKOS_ASSERT(x.extent(0) == Columns());
-            KOKKOS_ASSERT(y.extent(0) == Rows());
-            KOKKOS_ASSERT(x.extent(1) == y.extent(1));
             // Keep TPL setup and mutable resources out of the core operator's hot path.
             KokkosSparse::SPMVHandle<Exec, const_matrix_type, X, Y> handle(KokkosSparse::SPMV_NATIVE);
             KokkosSparse::spmv(exec, &handle, "N", alpha, matrix_, x, beta, y);

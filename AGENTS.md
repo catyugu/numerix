@@ -35,6 +35,8 @@ numerix 只在其上提供科学计算语义，不与 Eigen/PETSc 等特定数�
 - 索引不做窄化：区分 `size_type` 与 local/global ordinal，RangePolicy 的索引类型跟随 View 的 `index_type`。
 - 模板只用于静态多态、kernel 融合与零开销抽象；公共模板 API 必须由 concept 约束。
 - 不为不存在的需求做抽象或参数化；未被使用或只用一处的抽象应删除。
+- 公共 concept 只表达 numerix 自身的语义与稳定类型约束，不复刻第三方模板内部的算术表达式、分支
+  或可实例化性检查。第三方已完整实施的参数验证不重复检查，除非 numerix 承诺更严格的契约。
 
 ### 数据契约
 
